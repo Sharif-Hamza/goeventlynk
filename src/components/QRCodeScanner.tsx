@@ -24,61 +24,91 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
     const initializeScanner = async () => {
       try {
-        setDebugInfo('Initializing scanner...');
+        setDebugInfo('Requesting camera permission...');
+        
+        // First, explicitly request camera permission
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+        
+        // If we got here, permission was granted
+        setDebugInfo(prev => prev + '\nCamera permission granted');
+
+        // Initialize the barcode reader
         const codeReader = new BrowserMultiFormatReader();
-        codeReader.setHints(new Map([[DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]]]));
         readerRef.current = codeReader;
 
+        // Configure for Code128 format
+        codeReader.setHints(new Map([[DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]]]));
+
+        // Get available video devices
         const videoInputDevices = await codeReader.listVideoInputDevices();
-        setDebugInfo(prev => prev + '\nFound ' + videoInputDevices.length + ' cameras');
-        
-        // Prefer environment/back camera
+        setDebugInfo(prev => prev + '\nFound cameras: ' + videoInputDevices.map(device => device.label).join(', '));
+
+        // Select the back camera if available, otherwise use the first camera
         const selectedDevice = videoInputDevices.find(device => 
           device.label.toLowerCase().includes('back') || 
           device.label.toLowerCase().includes('environment')
         ) || videoInputDevices[0];
 
         if (!videoRef.current) {
-          setDebugInfo(prev => prev + '\nNo video element found');
-          return;
+          throw new Error('Video element not found');
         }
 
+        // Stop the initial stream to avoid conflicts
+        stream.getTracks().forEach(track => track.stop());
+
+        // Start the barcode reader with the selected device
         await codeReader.decodeFromConstraints(
           {
             video: {
               deviceId: selectedDevice?.deviceId,
-              facingMode: 'environment',
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
+              facingMode: { ideal: 'environment' },
+              width: { min: 640, ideal: 1280, max: 1920 },
+              height: { min: 480, ideal: 720, max: 1080 },
+              aspectRatio: { ideal: 1.7777777778 },
+              frameRate: { ideal: 30 }
             }
           },
           videoRef.current,
           async (result, error) => {
             if (result) {
-              setDebugInfo(prev => prev + '\nScanned data: ' + result.getText());
               const scannedData = result.getText();
+              setDebugInfo(prev => prev + '\nScanned data: ' + scannedData);
               
-              if (scannedData) {
-                codeReader.reset();
-                setScanning(false);
-                await processTicket(scannedData);
-              }
+              // Stop scanning and process the result
+              codeReader.reset();
+              setScanning(false);
+              await processTicket(scannedData);
             }
+            
+            // Only log non-NotFound errors (NotFound is expected when no barcode is in view)
             if (error && !(error instanceof NotFoundException)) {
               setDebugInfo(prev => prev + '\nScanner error: ' + error.message);
             }
           }
         );
 
+        setDebugInfo(prev => prev + '\nScanner initialized successfully');
       } catch (error) {
-        console.error('Error initializing scanner:', error);
-        setDebugInfo(prev => prev + '\nScanner error: ' + error.message);
-        setError('Failed to initialize scanner');
+        console.error('Scanner initialization error:', error);
+        setDebugInfo(prev => prev + '\nError: ' + error.message);
+        
+        if (error.name === 'NotAllowedError') {
+          setError('Camera permission denied. Please allow camera access and try again.');
+        } else if (error.name === 'NotFoundError') {
+          setError('No camera found. Please ensure your device has a camera and try again.');
+        } else {
+          setError('Failed to start camera. Please try again.');
+        }
+
+        setScanning(false);
       }
     };
 
     initializeScanner();
 
+    // Cleanup function
     return () => {
       if (readerRef.current) {
         readerRef.current.reset();
@@ -305,10 +335,11 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
             <button
               onClick={() => {
                 setError(null);
+                setScanning(true);
               }}
-              className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 w-full"
             >
-              Retry
+              Try Again
             </button>
           </div>
         ) : (
@@ -317,6 +348,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               ref={videoRef}
               className="absolute inset-0 w-full h-full object-cover"
               playsInline
+              autoPlay
               muted
             />
             <div className="absolute inset-0 flex items-center justify-center">

@@ -3,6 +3,7 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
+import { validateTicketData } from '../utils/ticketUtils';
 
 interface QRCodeScannerProps {
   onClose: () => void;
@@ -13,20 +14,20 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const { user } = useAuth();
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  const processTicket = async (ticketId: string) => {
+  const processTicket = async (encryptedData: string) => {
     if (!user) return;
 
     try {
-      console.log('Processing ticket:', ticketId);
+      console.log('Processing encrypted ticket data:', encryptedData);
       
-      // Try to parse JSON if the QR code contains JSON data
-      try {
-        const parsedData = JSON.parse(ticketId);
-        ticketId = parsedData.ticketId || parsedData.id || ticketId;
-      } catch (e) {
-        // If parsing fails, use the raw text
-        console.log('Using raw text as ticketId:', ticketId);
+      // Validate and decrypt the QR code data
+      const ticketData = validateTicketData(encryptedData);
+      if (!ticketData) {
+        toast.error('Invalid ticket data');
+        return;
       }
+
+      console.log('Decrypted ticket data:', ticketData);
 
       // Check user permissions
       const { data: userProfile, error: userError } = await supabase
@@ -46,12 +47,12 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         return;
       }
 
-      // Fetch ticket details
-      console.log('Fetching ticket with ID:', ticketId);
+      // Fetch ticket details using the decrypted ticketId
+      console.log('Fetching ticket with ID:', ticketData.ticketId);
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
         .select('*, events(*)')
-        .eq('id', ticketId)
+        .eq('id', ticketData.ticketId)
         .single();
 
       if (fetchError || !ticket) {
@@ -61,6 +62,17 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       }
 
       console.log('Found ticket:', ticket);
+
+      // Additional validation
+      if (ticket.user_id !== ticketData.userId) {
+        toast.error('Invalid ticket: User mismatch');
+        return;
+      }
+
+      if (ticket.event_id !== ticketData.eventId) {
+        toast.error('Invalid ticket: Event mismatch');
+        return;
+      }
 
       // Check club admin permissions
       if (userProfile.role === 'club_admin') {
@@ -90,7 +102,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
           used_at: new Date().toISOString(),
           validated_by: user.id
         })
-        .eq('id', ticketId);
+        .eq('id', ticketData.ticketId);
 
       if (updateError) {
         console.error('Ticket update error:', updateError);

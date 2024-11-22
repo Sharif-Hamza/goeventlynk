@@ -1,15 +1,24 @@
 import CryptoJS from 'crypto-js';
 import { supabase } from '../lib/supabase';
 
-// Use environment variable or a secure key management system in production
 const ENCRYPTION_KEY = import.meta.env.VITE_TICKET_ENCRYPTION_KEY || 'eventlynk-dev-key';
 
-// Function to get user's tickets
+// Function to get user's tickets with all details
 export const getUserTickets = async (userId: string) => {
   try {
     const { data: tickets, error } = await supabase
       .from('event_tickets_with_details')
-      .select('*')
+      .select(`
+        *,
+        events (
+          id,
+          name,
+          date,
+          location,
+          description,
+          image_url
+        )
+      `)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -25,63 +34,98 @@ export const getUserTickets = async (userId: string) => {
   }
 };
 
-export const createTicket = async (eventId: string, userId: string) => {
+export const createEventTicket = async (
+  userId: string,
+  eventId: string,
+  paymentStatus: 'not_required' | 'pending' | 'paid' = 'not_required',
+  paymentId?: string
+) => {
   try {
+    // Generate ticket data
     const ticketNumber = generateTicketNumber();
-    
-    const { data: ticket, error } = await supabase
+    const ticketData = {
+      ticketId: crypto.randomUUID(),
+      eventId,
+      userId,
+      ticketNumber,
+      timestamp: Date.now(),
+    };
+    const qrCodeData = generateQRCodeData(ticketData);
+
+    // Try to get existing ticket
+    const { data: existingTickets, error: existingError } = await supabase
       .from('event_tickets')
-      .insert([
-        {
-          event_id: eventId,
-          user_id: userId,
-          ticket_number: ticketNumber,
-          status: 'active',
-          created_at: new Date().toISOString(),
-        }
-      ])
+      .select('id')
+      .eq('user_id', userId)
+      .eq('event_id', eventId);
+
+    if (existingError) {
+      console.error('Error checking existing tickets:', existingError);
+      throw existingError;
+    }
+
+    // Prepare ticket data
+    const ticketToUpsert = {
+      user_id: userId,
+      event_id: eventId,
+      qr_code_data: qrCodeData,
+      ticket_number: ticketNumber,
+      payment_status: paymentStatus,
+      payment_id: paymentId,
+      status: 'valid'
+    };
+
+    // If ticket exists, include its ID
+    if (existingTickets?.[0]) {
+      ticketToUpsert['id'] = existingTickets[0].id;
+    }
+
+    // Create or update ticket
+    const { data: ticket, error: ticketError } = await supabase
+      .from('event_tickets')
+      .upsert(ticketToUpsert)
       .select()
       .single();
 
-    if (error) throw error;
+    if (ticketError || !ticket) {
+      console.error('Error managing ticket:', ticketError);
+      throw ticketError || new Error('Failed to manage ticket');
+    }
 
-    // Create encrypted ticket data
-    const ticketData = {
-      ticketId: ticket.id,
-      eventId: ticket.event_id,
-      userId: ticket.user_id,
-      ticketNumber: ticket.ticket_number,
-      timestamp: Date.now()
-    };
+    // Add a small delay to ensure the ticket is properly created in the database
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Return both the ticket and its encrypted data
-    return {
-      ...ticket,
-      encryptedData: encryptTicketData(ticketData)
-    };
+    // Get ticket with details
+    const { data: ticketWithDetails, error: detailsError } = await supabase
+      .from('event_tickets_with_details')
+      .select(`
+        *,
+        events (
+          id,
+          name,
+          date,
+          location,
+          description,
+          image_url
+        )
+      `)
+      .eq('id', ticket.id)
+      .single();
+
+    if (detailsError) {
+      console.error('Error fetching ticket details:', detailsError);
+      // Return the basic ticket if we can't get the details
+      return ticket;
+    }
+
+    return ticketWithDetails || ticket;
   } catch (error) {
-    console.error('Error creating ticket:', error);
+    console.error('Error in createEventTicket:', error);
     throw error;
   }
 };
 
-export const createEventTicket = async (
-  eventId: string,
-  userId: string,
-  ticketNumber: string = generateTicketNumber()
-): Promise<{ data: any; error: any }> => {
-  const ticketData = {
-    event_id: eventId,
-    user_id: userId,
-    ticket_number: ticketNumber,
-    status: 'valid',
-    created_at: new Date().toISOString()
-  };
-
-  return await supabase.from('event_tickets').insert([ticketData]);
-};
-
-export const generateTicketNumber = (): string => {
+export const generateTicketNumber = () => {
   const timestamp = Date.now();
   const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
   return `TKT-${timestamp}-${random}`;
@@ -118,6 +162,10 @@ export const validateTicketData = (encryptedData: string): any => {
   }
 };
 
+export const generateQRCodeData = (ticketData: any): string => {
+  return encryptTicketData(ticketData);
+};
+
 export const validateTicket = async (ticketId: string, validatedBy: string) => {
   return await supabase
     .from('event_tickets')
@@ -132,7 +180,17 @@ export const validateTicket = async (ticketId: string, validatedBy: string) => {
 export const getTicketByNumber = async (ticketNumber: string) => {
   return await supabase
     .from('event_tickets')
-    .select('*, events(*)')
+    .select(`
+      *,
+      events (
+        id,
+        name,
+        date,
+        location,
+        description,
+        image_url
+      )
+    `)
     .eq('ticket_number', ticketNumber)
     .single();
 };

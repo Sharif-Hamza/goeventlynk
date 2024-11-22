@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
-import { validateTicketData } from '../utils/ticketUtils';
+import React, { useState } from 'react';
+import QrReader from 'react-qr-reader-es6';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,45 +9,30 @@ interface QRCodeScannerProps {
 }
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
-  const [scanner, setScanner] = useState<Html5Qrcode | null>(null);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [scanning, setScanning] = useState(true);
   const { user } = useAuth();
 
-  const requestCameraPermission = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode: { ideal: 'environment' } 
-        } 
-      });
-      stream.getTracks().forEach(track => track.stop());
-      setHasPermission(true);
-      return true;
-    } catch (error) {
-      console.error('Camera permission error:', error);
-      setHasPermission(false);
-      return false;
-    }
-  }, []);
+  const handleError = (err: any) => {
+    console.error('QR Scanner error:', err);
+    toast.error('Failed to access camera. Please check permissions and try again.');
+  };
 
-  const onScanSuccess = useCallback(async (decodedText: string) => {
-    if (!scanner || !user) return;
-    
-    try {
-      // Stop scanning immediately after successful scan
-      await scanner.stop();
+  const handleScan = async (data: string | null) => {
+    if (!data || !user || !scanning) return;
+    setScanning(false);
 
-      let ticketId = decodedText;
+    try {
+      let ticketId = data;
       
-      // Check if the scanned text is a JSON string (from QR code)
+      // Check if the scanned text is a JSON string
       try {
-        const parsedData = JSON.parse(decodedText);
-        ticketId = parsedData.ticketId || parsedData.id || decodedText;
+        const parsedData = JSON.parse(data);
+        ticketId = parsedData.ticketId || parsedData.id || data;
       } catch (e) {
         // If parsing fails, assume the scanned text is the ticket ID directly
       }
 
-      // First check if the user has permission to validate tickets
+      // Check user permissions
       const { data: userProfile, error: userError } = await supabase
         .from('profiles')
         .select('role')
@@ -57,17 +41,17 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (userError || !userProfile) {
         toast.error('Failed to verify user permissions');
-        await scanner.start();
+        setScanning(true);
         return;
       }
 
       if (!['admin', 'club_admin'].includes(userProfile.role)) {
         toast.error('You do not have permission to validate tickets');
-        await scanner.start();
+        setScanning(true);
         return;
       }
 
-      // Fetch ticket from database with event details
+      // Fetch ticket details
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
         .select('*, events(*)')
@@ -76,11 +60,11 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (fetchError || !ticket) {
         toast.error('Ticket not found');
-        await scanner.start();
+        setScanning(true);
         return;
       }
 
-      // For club_admin, verify they have permission for this event
+      // Check club admin permissions
       if (userProfile.role === 'club_admin') {
         const { data: clubAdmin } = await supabase
           .from('club_admins')
@@ -91,18 +75,18 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
         if (!clubAdmin) {
           toast.error('You do not have permission to validate tickets for this event');
-          await scanner.start();
+          setScanning(true);
           return;
         }
       }
 
       if (ticket.used_at) {
         toast.error('Ticket has already been used');
-        await scanner.start();
+        setScanning(true);
         return;
       }
 
-      // Update ticket as used
+      // Update ticket
       const { error: updateError } = await supabase
         .from('event_tickets')
         .update({ 
@@ -113,7 +97,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (updateError) {
         toast.error('Failed to validate ticket');
-        await scanner.start();
+        setScanning(true);
         return;
       }
 
@@ -122,64 +106,9 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     } catch (error) {
       console.error('Error handling scan:', error);
       toast.error('Failed to process ticket');
-      await scanner.start();
+      setScanning(true);
     }
-  }, [scanner, onClose, user]);
-
-  useEffect(() => {
-    const initializeScanner = async () => {
-      const hasPermissions = await requestCameraPermission();
-      if (!hasPermissions) {
-        toast.error('Camera permission is required to scan tickets');
-        return;
-      }
-
-      const html5QrCode = new Html5Qrcode("qr-reader");
-      
-      try {
-        const cameras = await Html5Qrcode.getCameras();
-        if (!cameras || cameras.length === 0) {
-          toast.error('No cameras found on your device');
-          return;
-        }
-
-        // Try to use the back camera first
-        const camera = cameras.find(cam => 
-          cam.label.toLowerCase().includes('back') || 
-          cam.label.toLowerCase().includes('rear')
-        ) || cameras[0];
-
-        await html5QrCode.start(
-          camera.id,
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
-          },
-          onScanSuccess,
-          (errorMessage) => {
-            // Ignore "No QR code found" messages
-            if (!errorMessage.includes('No QR code found')) {
-              console.warn(errorMessage);
-            }
-          }
-        );
-
-        setScanner(html5QrCode);
-      } catch (err) {
-        console.error('Error starting scanner:', err);
-        toast.error('Failed to start camera. Please check permissions and try again.');
-      }
-    };
-
-    initializeScanner();
-
-    return () => {
-      if (scanner) {
-        scanner.stop().catch(console.error);
-      }
-    };
-  }, [onScanSuccess, requestCameraPermission]);
+  };
 
   if (!user) {
     return (
@@ -214,34 +143,18 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         </div>
         
         <div className="p-4">
-          {hasPermission === false && (
-            <div className="text-center p-4">
-              <p className="text-red-600 mb-4">Camera access is required to scan tickets.</p>
-              <p className="text-sm text-gray-600">
-                Please enable camera access in your browser settings and try again.
-              </p>
-              <button
-                onClick={() => requestCameraPermission()}
-                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-              >
-                Request Camera Access
-              </button>
-            </div>
-          )}
-          <div 
-            id="qr-reader" 
-            className="overflow-hidden rounded-lg"
-            style={{
-              width: '100%',
-              minHeight: '300px',
-              display: hasPermission === false ? 'none' : 'block'
-            }}
-          />
-          {hasPermission !== false && (
-            <p className="text-sm text-gray-600 mt-4 text-center">
-              Position the QR code within the frame to scan
-            </p>
-          )}
+          <div className="overflow-hidden rounded-lg">
+            <QrReader
+              delay={300}
+              onError={handleError}
+              onScan={handleScan}
+              style={{ width: '100%' }}
+              facingMode="environment"
+            />
+          </div>
+          <p className="text-sm text-gray-600 mt-4 text-center">
+            Position the QR code within the frame to scan
+          </p>
         </div>
       </div>
     </div>

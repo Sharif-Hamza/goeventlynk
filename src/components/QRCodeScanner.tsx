@@ -4,13 +4,13 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { validateTicketData } from '../utils/ticketUtils';
 import { X } from 'lucide-react';
-import { BrowserMultiFormatReader } from '@zxing/library';
+import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/library';
 
 interface QRCodeScannerProps {
   onClose: () => void;
 }
 
-const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
+const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [scanning, setScanning] = useState(false);
@@ -19,33 +19,37 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
 
   useEffect(() => {
-    readerRef.current = new BrowserMultiFormatReader();
-    readerRef.current.setHints(new Map([
-      ['possibleFormats', ['QR_CODE']]
-    ]));
-
-    const startScanning = async () => {
+    const initializeScanner = async () => {
       try {
+        readerRef.current = new BrowserMultiFormatReader();
+        readerRef.current.formats = [BarcodeFormat.CODE_128];
+        
         setScanning(true);
         setDebugInfo('Starting scanner...');
         
         if (!videoRef.current) return;
         
-        await readerRef.current?.decodeFromConstraints(
+        await readerRef.current.decodeFromConstraints(
           {
             audio: false,
             video: {
               facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              aspectRatio: { ideal: 1.7777777778 }
             }
           },
           videoRef.current,
-          (result, error) => {
+          (result, err) => {
             if (result) {
-              setDebugInfo('QR Code found: ' + result.getText());
+              setDebugInfo('Barcode found: ' + result.getText());
               processTicket(result.getText());
             }
-            if (error) {
-              setDebugInfo(prev => prev + '\nScanning...');
+            if (err && scanning) {
+              // Only update debug info occasionally to avoid flooding
+              if (Math.random() < 0.1) {
+                setDebugInfo(prev => prev + '\nScanning...');
+              }
             }
           }
         );
@@ -56,7 +60,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       }
     };
 
-    startScanning();
+    initializeScanner();
 
     return () => {
       if (readerRef.current) {
@@ -64,7 +68,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       }
       setScanning(false);
     };
-  }, [onClose]);
+  }, []);
 
   const processTicket = async (encryptedData: string) => {
     if (!user) return;
@@ -81,6 +85,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       setDebugInfo(prev => prev + '\nTicket data validated');
 
+      // Verify user permissions
       const { data: userProfile, error: userError } = await supabase
         .from('profiles')
         .select('role')
@@ -95,14 +100,14 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (!['admin', 'club_admin'].includes(userProfile.role)) {
         setDebugInfo(prev => prev + '\nInsufficient permissions');
-        toast.error('You do not have permission to validate tickets');
+        toast.error('Insufficient permissions to validate tickets');
         return;
       }
 
       setDebugInfo(prev => prev + '\nFetching ticket details...');
       const { data: ticket, error: fetchError } = await supabase
-        .from('event_tickets')
-        .select('*, events(*)')
+        .from('tickets')
+        .select('*')
         .eq('id', ticketData.ticketId)
         .single();
 
@@ -114,7 +119,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (ticket.user_id !== ticketData.userId || ticket.event_id !== ticketData.eventId) {
         setDebugInfo(prev => prev + '\nTicket data mismatch');
-        toast.error('Invalid ticket: Mismatch in ticket data');
+        toast.error('Invalid ticket data');
         return;
       }
 
@@ -126,11 +131,8 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       setDebugInfo(prev => prev + '\nValidating ticket...');
       const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({
-          used_at: new Date().toISOString(),
-          validated_by: user.id
-        })
+        .from('tickets')
+        .update({ used_at: new Date().toISOString() })
         .eq('id', ticketData.ticketId);
 
       if (updateError) {
@@ -151,14 +153,15 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-4 w-full max-w-md mx-4">
+      <div className="bg-white p-4 rounded-lg shadow-lg w-full max-w-md">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Scan Ticket QR Code</h3>
+          <h3 className="text-lg font-semibold">Scan Ticket Barcode</h3>
           <button
             onClick={() => {
               if (readerRef.current) {
                 readerRef.current.reset();
               }
+              setScanning(false);
               onClose();
             }}
             className="text-gray-500 hover:text-gray-700"
@@ -179,33 +182,30 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               Retry
             </button>
           </div>
-        ) : null}
-
-        <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-black">
-          <video
-            ref={videoRef}
-            className="absolute inset-0 w-full h-full object-cover"
-            playsInline
-            muted
-          />
-          <div className="absolute inset-0 border-2 border-purple-500 rounded-lg pointer-events-none" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-48 h-48 border-2 border-purple-500 rounded-lg" />
-          </div>
-        </div>
-
-        <p className="text-sm text-gray-500 text-center mt-4">
-          Position the QR code within the frame to scan
-        </p>
-
-        {import.meta.env.DEV && (
-          <div className="mt-4 p-2 bg-gray-100 rounded text-xs font-mono whitespace-pre-wrap">
-            {debugInfo}
+        ) : (
+          <div className="relative aspect-[16/9] w-full bg-black rounded-lg overflow-hidden">
+            <video
+              ref={videoRef}
+              className="absolute inset-0 w-full h-full object-cover"
+              playsInline
+              muted
+            />
+            <div className="absolute inset-0 flex items-center justify-center">
+              {/* Narrower scanning area for barcodes */}
+              <div className="w-full h-16 border-2 border-purple-500 bg-purple-500 bg-opacity-10">
+                <div className="w-full h-full border-l-2 border-r-2 border-purple-500 animate-pulse" />
+              </div>
+            </div>
           </div>
         )}
+
+        <div className="mt-4 p-2 bg-gray-100 rounded text-sm">
+          <p>Debug Info:</p>
+          <pre className="whitespace-pre-wrap text-xs">{debugInfo}</pre>
+        </div>
       </div>
     </div>
   );
 };
 
-export default QRCodeScanner;
+export default BarcodeScanner;

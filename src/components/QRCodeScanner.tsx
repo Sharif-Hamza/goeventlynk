@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { validateTicketData } from '../utils/ticketUtils';
+import { validateTicketData, decryptTicketData } from '../utils/ticketUtils';
 import { X } from 'lucide-react';
 import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/library';
 
@@ -14,10 +14,12 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(true);
+  const [scanning, setScanning] = useState(false);
   const [debugInfo, setDebugInfo] = useState<string>('');
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [manualInput, setManualInput] = useState<string>('');
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
 
   useEffect(() => {
     const initializeScanner = async () => {
@@ -44,7 +46,7 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
           (result, err) => {
             if (result) {
               setDebugInfo('Barcode found: ' + result.getText());
-              processTicket(result.getText());
+              handleTicketValidation(result.getText());
             }
             if (err && scanning) {
               if (Math.random() < 0.1) {
@@ -69,6 +71,57 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
       setScanning(false);
     };
   }, []);
+
+  const handleTicketValidation = async (ticketData: string) => {
+    try {
+      setDebugInfo(`Validating ticket data: ${ticketData}`);
+      const decryptedData = decryptTicketData(ticketData);
+      
+      if (!decryptedData) {
+        throw new Error('Invalid ticket data');
+      }
+
+      const { ticketId, eventId, userId, ticketNumber, timestamp } = decryptedData;
+
+      // Check if ticket exists and is valid
+      const { data: ticketRecord, error: ticketError } = await supabase
+        .from('event_tickets')
+        .select('*')
+        .eq('id', ticketId)
+        .eq('event_id', eventId)
+        .eq('user_id', userId)
+        .eq('ticket_number', ticketNumber)
+        .single();
+
+      if (ticketError || !ticketRecord) {
+        throw new Error('Ticket not found');
+      }
+
+      if (ticketRecord.status === 'used') {
+        throw new Error('Ticket has already been used');
+      }
+
+      // Update ticket status to used
+      const { error: updateError } = await supabase
+        .from('event_tickets')
+        .update({ 
+          status: 'used',
+          used_at: new Date().toISOString()
+        })
+        .eq('id', ticketId);
+
+      if (updateError) {
+        throw new Error('Failed to update ticket status');
+      }
+
+      setSuccess('Ticket validated successfully!');
+      setError(null);
+      
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to validate ticket');
+      setSuccess(null);
+    }
+  };
 
   const verifyTicketByNumber = async (ticketNumber: string) => {
     if (!user) return;
@@ -140,85 +193,6 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
     }
   };
 
-  const processTicket = async (scannedData: string) => {
-    if (!user) return;
-    
-    try {
-      setDebugInfo('Processing scanned data: ' + scannedData);
-      
-      // Try to decrypt the scanned data
-      const ticketData = validateTicketData(scannedData);
-      if (!ticketData) {
-        setDebugInfo(prev => prev + '\nInvalid ticket data');
-        toast.error('Invalid ticket data');
-        return;
-      }
-
-      // Get ticket from database using ticket ID and number
-      const { data: ticket, error: fetchError } = await supabase
-        .from('event_tickets')
-        .select('*, events(*)')
-        .eq('id', ticketData.ticketId)
-        .eq('ticket_number', ticketData.ticketNumber)
-        .single();
-
-      if (fetchError || !ticket) {
-        setDebugInfo(prev => prev + '\nTicket not found');
-        toast.error('Ticket not found');
-        return;
-      }
-
-      // Verify user permissions
-      const { data: userProfile, error: userError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userProfile) {
-        setDebugInfo(prev => prev + '\nFailed to verify permissions');
-        toast.error('Failed to verify user permissions');
-        return;
-      }
-
-      if (!['admin', 'club_admin'].includes(userProfile.role)) {
-        setDebugInfo(prev => prev + '\nInsufficient permissions');
-        toast.error('Insufficient permissions to validate tickets');
-        return;
-      }
-
-      if (ticket.used_at) {
-        setDebugInfo(prev => prev + '\nTicket already used');
-        toast.error('Ticket has already been used');
-        return;
-      }
-
-      // Update ticket status
-      const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({
-          used_at: new Date().toISOString(),
-          validated_by: user.id,
-          status: 'used'
-        })
-        .eq('id', ticket.id);
-
-      if (updateError) {
-        setDebugInfo(prev => prev + '\nValidation failed');
-        toast.error('Failed to validate ticket');
-        return;
-      }
-
-      setDebugInfo(prev => prev + '\nTicket validated successfully!');
-      toast.success('Ticket validated successfully!');
-      onClose();
-    } catch (error) {
-      console.error('Error processing ticket:', error);
-      setDebugInfo(prev => prev + '\nError: ' + error.message);
-      toast.error('Failed to process ticket');
-    }
-  };
-
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (manualInput.trim()) {
@@ -274,7 +248,6 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
               onClick={() => {
                 setError(null);
                 setScanning(true);
-                initializeScanner();
               }}
               className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 w-full"
             >
@@ -295,6 +268,12 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
                 <div className="w-full h-full border-l-2 border-r-2 border-purple-500 animate-pulse" />
               </div>
             </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="text-green-500 text-center mb-4">
+            {success}
           </div>
         )}
 

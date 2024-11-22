@@ -2,7 +2,7 @@ import CryptoJS from 'crypto-js';
 import { supabase } from '../lib/supabase';
 
 // Use environment variable or a secure key management system in production
-const ENCRYPTION_KEY = import.meta.env.VITE_TICKET_ENCRYPTION_KEY || 'eventlynk-dev-key';
+const ENCRYPTION_KEY = process.env.NEXT_PUBLIC_ENCRYPTION_KEY || 'default-key-for-development';
 
 export interface TicketData {
   ticketId: string;
@@ -18,26 +18,47 @@ export const generateTicketNumber = () => {
   return `TKT-${timestamp}-${random}`;
 };
 
-export const encryptTicketData = (data: TicketData): string => {
-  const jsonString = JSON.stringify(data);
-  return CryptoJS.AES.encrypt(jsonString, ENCRYPTION_KEY).toString();
-};
-
-export const decryptTicketData = (encryptedData: string): TicketData => {
-  const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
-  const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
-  return JSON.parse(decryptedString);
-};
-
-export const validateTicketData = (encryptedData: string): TicketData | null => {
+export const encryptTicketData = (ticketData: {
+  ticketId: string;
+  eventId: string;
+  userId: string;
+  ticketNumber: string;
+  timestamp: number;
+}): string => {
   try {
-    const decrypted = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
-    const jsonString = decrypted.toString(CryptoJS.enc.Utf8);
-    return JSON.parse(jsonString);
+    const dataString = JSON.stringify(ticketData);
+    return CryptoJS.AES.encrypt(dataString, ENCRYPTION_KEY).toString();
   } catch (error) {
-    console.error('Error validating ticket data:', error);
+    console.error('Error encrypting ticket data:', error);
+    return '';
+  }
+};
+
+export const decryptTicketData = (encryptedData: string): {
+  ticketId: string;
+  eventId: string;
+  userId: string;
+  ticketNumber: string;
+  timestamp: number;
+} | null => {
+  try {
+    const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
+    const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
+    if (!decryptedString) {
+      return null;
+    }
+    return JSON.parse(decryptedString);
+  } catch (error) {
+    console.error('Error decrypting ticket data:', error);
     return null;
   }
+};
+
+export const validateTicketData = (ticketData: any): boolean => {
+  if (!ticketData) return false;
+  
+  const requiredFields = ['ticketId', 'eventId', 'userId', 'ticketNumber', 'timestamp'];
+  return requiredFields.every(field => ticketData.hasOwnProperty(field));
 };
 
 export const generateQRCodeData = (ticketData: TicketData): string => {

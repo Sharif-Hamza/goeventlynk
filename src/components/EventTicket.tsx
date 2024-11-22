@@ -9,40 +9,32 @@ interface EventTicketProps {
   eventName: string;
   eventDate: string;
   eventLocation: string;
-  ticket: {
-    id: string;
-    event_id: string;
-    user_id: string;
-    ticket_number: string;
-    status: string;
-    used_at?: string;
-  };
+  ticketNumber: string;
+  qrCodeData: string;
+  userName: string;
+  status: string;
+  encryptedData: string;
 }
 
 const EventTicket: React.FC<EventTicketProps> = ({
   eventName,
   eventDate,
   eventLocation,
-  ticket
+  ticketNumber,
+  qrCodeData,
+  userName,
+  status,
+  encryptedData
 }) => {
-  const [barcodeData, setBarcodeData] = useState<string>('');
   const ticketRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const generateBarcodeData = () => {
-      const ticketData = {
-        ticketId: ticket.id,
-        eventId: ticket.event_id,
-        userId: ticket.user_id,
-        ticketNumber: ticket.ticket_number,
-        timestamp: Date.now()
-      };
-      const encrypted = encryptTicketData(ticketData);
-      setBarcodeData(encrypted);
+    const generateBarcode = async () => {
+      // No need to generate barcode data URL, react-barcode will handle it
     };
 
-    generateBarcodeData();
-  }, [ticket]);
+    generateBarcode();
+  }, [qrCodeData]);
 
   const downloadTicket = async () => {
     if (!ticketRef.current) return;
@@ -87,30 +79,30 @@ const EventTicket: React.FC<EventTicketProps> = ({
             
             <div>
               <p className="text-sm text-gray-500">Ticket Number</p>
-              <p className="font-medium">{ticket.ticket_number}</p>
+              <p className="font-medium">{ticketNumber}</p>
             </div>
             
             <div>
               <p className="text-sm text-gray-500">Attendee</p>
-              <p className="font-medium">{ticket.user_id}</p>
+              <p className="font-medium">{userName}</p>
             </div>
 
             <div>
               <p className="text-sm text-gray-500">Status</p>
               <span className={`inline-block px-2 py-1 rounded text-sm font-medium ${
-                ticket.status === 'used' ? 'bg-red-100 text-red-800' :
-                ticket.status === 'valid' ? 'bg-green-100 text-green-800' :
+                status === 'used' ? 'bg-red-100 text-red-800' :
+                status === 'valid' ? 'bg-green-100 text-green-800' :
                 'bg-gray-100 text-gray-800'
               }`}>
-                {ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
+                {status.charAt(0).toUpperCase() + status.slice(1)}
               </span>
             </div>
           </div>
 
           <div className="flex flex-col items-center justify-center p-4 bg-white rounded-lg shadow-md">
-            <div className="mb-2 text-lg font-semibold">Ticket #{ticket.ticket_number}</div>
+            <div className="mb-2 text-lg font-semibold">Ticket #{ticketNumber}</div>
             <Barcode
-              value={barcodeData}
+              value={encryptedData || ticketNumber}
               format="CODE128"
               width={2}
               height={100}

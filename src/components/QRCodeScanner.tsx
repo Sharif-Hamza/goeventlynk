@@ -18,33 +18,70 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number>();
   const jsQRRef = useRef<any>(null);
+  const [isMounted, setIsMounted] = useState(true);
 
   useEffect(() => {
     // Dynamically import jsQR
-    import('jsqr').then(module => {
-      jsQRRef.current = module.default;
-    }).catch(err => {
-      console.error('Failed to load jsQR:', err);
-      setError('Failed to initialize QR scanner');
-    });
+    const loadJsQR = async () => {
+      try {
+        const jsQR = (await import('jsqr')).default;
+        if (isMounted) {
+          jsQRRef.current = jsQR;
+          startCamera();
+        }
+      } catch (err) {
+        console.error('Failed to load jsQR:', err);
+        setError('Failed to initialize QR scanner');
+      }
+    };
+    
+    loadJsQR();
+    
+    return () => {
+      setIsMounted(false);
+      stopScanning();
+    };
   }, []);
 
   const startCamera = async () => {
     try {
       setError(null);
       
-      // Try to get the camera with basic constraints first
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
+      // Get all video devices
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      
+      // Try to get the back camera
+      const backCamera = videoDevices.find(device => 
+        device.label.toLowerCase().includes('back') || 
+        device.label.toLowerCase().includes('rear')
+      );
+      
+      // Camera constraints
+      const constraints = {
+        video: {
           facingMode: 'environment',
           width: { ideal: 1280 },
-          height: { ideal: 720 }
+          height: { ideal: 720 },
+          ...(backCamera ? { deviceId: { exact: backCamera.deviceId } } : {})
         }
-      });
+      };
       
-      if (videoRef.current) {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      if (videoRef.current && isMounted) {
         videoRef.current.srcObject = stream;
         streamRef.current = stream;
+        
+        // Wait for video to be ready
+        await new Promise((resolve) => {
+          if (videoRef.current) {
+            videoRef.current.onloadedmetadata = () => {
+              resolve(true);
+            };
+          }
+        });
+        
         await videoRef.current.play();
         setScanning(true);
         scanQRCode();
@@ -57,7 +94,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   };
 
   const scanQRCode = () => {
-    if (!canvasRef.current || !videoRef.current || !jsQRRef.current) return;
+    if (!canvasRef.current || !videoRef.current || !jsQRRef.current || !isMounted) return;
 
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -65,38 +102,43 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
     if (!context) return;
 
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
     const scan = () => {
+      if (!isMounted) return;
+
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Draw video frame to canvas with proper orientation
-        context.save();
-        context.translate(canvas.width, 0);
-        context.scale(-1, 1);
+        // Set canvas dimensions to match video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // Draw the video frame to canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        context.restore();
         
+        // Get image data for QR code scanning
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
         
-        // Scan for QR code
-        const code = jsQRRef.current(imageData.data, imageData.width, imageData.height);
-        
-        if (code) {
-          // QR code found!
-          processTicket(code.data);
-          return; // Stop scanning after finding a valid QR code
+        try {
+          // Attempt to find QR code in frame
+          const code = jsQRRef.current(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+          });
+          
+          if (code) {
+            console.log('QR Code found:', code.data);
+            processTicket(code.data);
+            return;
+          }
+        } catch (err) {
+          console.error('Error scanning QR code:', err);
         }
       }
       
-      // Continue scanning
-      if (scanning) {
+      // Continue scanning if still active
+      if (scanning && isMounted) {
         animationFrameRef.current = requestAnimationFrame(scan);
       }
     };
 
-    animationFrameRef.current = requestAnimationFrame(scan);
+    scan();
   };
 
   const stopScanning = () => {
@@ -113,17 +155,8 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     }
   };
 
-  useEffect(() => {
-    if (user) {
-      startCamera();
-    }
-    return () => {
-      stopScanning();
-    };
-  }, [user]);
-
   const processTicket = async (encryptedData: string) => {
-    if (!user) return;
+    if (!user || !isMounted) return;
 
     try {
       console.log('Processing encrypted ticket data:', encryptedData);
@@ -204,7 +237,9 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     } catch (error) {
       console.error('Error processing ticket:', error);
       toast.error('Failed to process ticket');
-      startCamera();
+      if (isMounted) {
+        startCamera();
+      }
     }
   };
 
@@ -214,7 +249,10 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold">Scan Ticket QR Code</h3>
           <button
-            onClick={onClose}
+            onClick={() => {
+              stopScanning();
+              onClose();
+            }}
             className="text-gray-500 hover:text-gray-700"
           >
             <X size={24} />
@@ -224,20 +262,28 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         {error ? (
           <div className="text-red-500 text-center mb-4">
             {error}
+            <button
+              onClick={() => {
+                setError(null);
+                startCamera();
+              }}
+              className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Retry
+            </button>
           </div>
         ) : null}
 
-        <div className="relative aspect-square w-full overflow-hidden rounded-lg">
+        <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-black">
           <video
             ref={videoRef}
-            className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
+            className="absolute inset-0 w-full h-full object-cover"
             playsInline
             muted
           />
           <canvas
             ref={canvasRef}
-            className="absolute inset-0 w-full h-full"
-            style={{ display: 'none' }}
+            className="absolute inset-0 w-full h-full hidden"
           />
           <div className="absolute inset-0 border-2 border-purple-500 rounded-lg pointer-events-none" />
           <div className="absolute inset-0 flex items-center justify-center">

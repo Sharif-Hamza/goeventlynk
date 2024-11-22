@@ -3,7 +3,6 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { validateTicketData } from '../utils/ticketUtils';
-import jsQR from 'jsqr';
 
 interface QRCodeScannerProps {
   onClose: () => void;
@@ -17,6 +16,17 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number>();
+  const jsQRRef = useRef<any>(null);
+
+  useEffect(() => {
+    // Dynamically import jsQR
+    import('jsqr').then(module => {
+      jsQRRef.current = module.default;
+    }).catch(err => {
+      console.error('Failed to load jsQR:', err);
+      setError('Failed to initialize QR scanner');
+    });
+  }, []);
 
   const startCamera = async () => {
     try {
@@ -42,7 +52,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   };
 
   const scanQRCode = () => {
-    if (!canvasRef.current || !videoRef.current) return;
+    if (!canvasRef.current || !videoRef.current || !jsQRRef.current) return;
 
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -61,7 +71,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
         
         // Scan for QR code
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        const code = jsQRRef.current(imageData.data, imageData.width, imageData.height);
         
         if (code) {
           // QR code found!

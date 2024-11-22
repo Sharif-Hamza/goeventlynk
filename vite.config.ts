@@ -11,20 +11,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         cleanupOutdatedCaches: true,
-        sourcemap: true,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/ixeumchjsmrbzimzmffc\.supabase\.co\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 // 24 hours
-              }
-            }
-          }
-        ]
+        sourcemap: true
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
@@ -37,7 +24,6 @@ export default defineConfig({
         scope: '/',
         start_url: '/',
         orientation: 'portrait',
-        permissions: ['camera'],
         icons: [
           {
             src: '/pwa-192x192.png',
@@ -62,6 +48,16 @@ export default defineConfig({
   server: {
     https: true,
     port: 5173,
-    host: true // Allow access from mobile devices on local network
+    host: true
+  },
+  build: {
+    rollupOptions: {
+      external: [],
+      output: {
+        manualChunks: {
+          vendor: ['jsqr']
+        }
+      }
+    }
   }
 });

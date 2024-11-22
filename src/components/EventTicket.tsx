@@ -10,11 +10,9 @@ interface EventTicketProps {
     status: string;
     used_at?: string;
     qr_code_data?: string;
-    event?: {
-      title: string;
-      event_date: string;
-      location: string;
-    };
+    title: string;
+    event_date: string;
+    location: string;
   };
 }
 
@@ -25,9 +23,9 @@ const EventTicket: React.FC<EventTicketProps> = ({ ticket }) => {
     <div className="p-4 bg-white rounded-lg shadow-md max-w-md mx-auto" ref={ticketRef}>
       <div className="space-y-4">
         <div className="text-center">
-          <h2 className="text-xl font-bold text-gray-800">{ticket.event?.title}</h2>
-          <p className="text-gray-600">{ticket.event?.event_date}</p>
-          <p className="text-gray-600">{ticket.event?.location}</p>
+          <h2 className="text-xl font-bold text-gray-800">{ticket.title}</h2>
+          <p className="text-gray-600">{ticket.event_date}</p>
+          <p className="text-gray-600">{ticket.location}</p>
         </div>
 
         <div className="border-t border-b border-gray-200 py-4">

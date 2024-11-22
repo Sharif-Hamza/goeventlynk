@@ -3,6 +3,14 @@ import { supabase } from '../lib/supabase';
 
 const ENCRYPTION_KEY = import.meta.env.VITE_TICKET_ENCRYPTION_KEY || 'eventlynk-dev-key';
 
+interface TicketData {
+  ticketId: string;
+  eventId: string;
+  userId: string;
+  ticketNumber: string;
+  timestamp: number;
+}
+
 // Function to get user's tickets with all details
 export const getUserTickets = async (userId: string) => {
   try {
@@ -41,15 +49,19 @@ export const createEventTicket = async (
   paymentId?: string
 ) => {
   try {
-    // Generate ticket data
+    const ticketId = crypto.randomUUID();
     const ticketNumber = generateTicketNumber();
-    const ticketData = {
-      ticketId: crypto.randomUUID(),
+    
+    // Create ticket data for the barcode
+    const ticketData: TicketData = {
+      ticketId,
       eventId,
       userId,
       ticketNumber,
       timestamp: Date.now(),
     };
+
+    // Encrypt the ticket data for the barcode
     const qrCodeData = generateQRCodeData(ticketData);
 
     // Try to get existing ticket
@@ -64,21 +76,22 @@ export const createEventTicket = async (
       throw existingError;
     }
 
-    // Prepare ticket data
+    // Prepare ticket data for database
     const ticketToUpsert = {
+      id: ticketId,
       user_id: userId,
       event_id: eventId,
-      qr_code_data: qrCodeData,
       ticket_number: ticketNumber,
+      qr_code_data: qrCodeData,
+      ticket_data: ticketData, // Store raw ticket data for validation
       payment_status: paymentStatus,
       payment_id: paymentId,
-      status: 'valid',
-      ticket_data: ticketData // Store the raw ticket data for validation
+      status: 'valid'
     };
 
-    // If ticket exists, include its ID
+    // If ticket exists, use its ID
     if (existingTickets?.[0]) {
-      ticketToUpsert['id'] = existingTickets[0].id;
+      ticketToUpsert.id = existingTickets[0].id;
     }
 
     // Create or update ticket
@@ -93,10 +106,7 @@ export const createEventTicket = async (
       throw ticketError || new Error('Failed to manage ticket');
     }
 
-    // Add a small delay to ensure the ticket is properly created in the database
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Get ticket with details
+    // Get ticket with event details
     const { data: ticketWithDetails, error: detailsError } = await supabase
       .from('event_tickets')
       .select(`
@@ -115,7 +125,6 @@ export const createEventTicket = async (
 
     if (detailsError) {
       console.error('Error fetching ticket details:', detailsError);
-      // Return the basic ticket if we can't get the details
       return ticket;
     }
 
@@ -132,12 +141,12 @@ export const generateTicketNumber = () => {
   return `TKT-${timestamp}-${random}`;
 };
 
-export const encryptTicketData = (data: any): string => {
+export const encryptTicketData = (data: TicketData): string => {
   const jsonString = JSON.stringify(data);
   return CryptoJS.AES.encrypt(jsonString, ENCRYPTION_KEY).toString();
 };
 
-export const decryptTicketData = (encryptedData: string): any => {
+export const decryptTicketData = (encryptedData: string): TicketData | null => {
   try {
     const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
     const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
@@ -148,13 +157,14 @@ export const decryptTicketData = (encryptedData: string): any => {
   }
 };
 
-export const validateTicketData = (encryptedData: string): any => {
+export const validateTicketData = (encryptedData: string): TicketData | null => {
   try {
     const decrypted = decryptTicketData(encryptedData);
     if (!decrypted) return null;
 
-    const requiredFields = ['ticketId', 'eventId', 'userId', 'ticketNumber', 'timestamp'];
-    const isValid = requiredFields.every(field => decrypted.hasOwnProperty(field));
+    // Verify all required fields are present
+    const requiredFields: (keyof TicketData)[] = ['ticketId', 'eventId', 'userId', 'ticketNumber', 'timestamp'];
+    const isValid = requiredFields.every(field => decrypted[field] !== undefined);
     
     return isValid ? decrypted : null;
   } catch (error) {
@@ -163,33 +173,28 @@ export const validateTicketData = (encryptedData: string): any => {
   }
 };
 
-export const generateQRCodeData = (ticketData: any): string => {
+export const generateQRCodeData = (ticketData: TicketData): string => {
   return encryptTicketData(ticketData);
 };
 
 export const validateTicket = async (ticketId: string, validatedBy: string) => {
   try {
-    // First get the ticket to check its current status
+    // Get current ticket status
     const { data: ticket, error: fetchError } = await supabase
       .from('event_tickets')
       .select('*')
       .eq('id', ticketId)
       .single();
 
-    if (fetchError) {
-      console.error('Error fetching ticket:', fetchError);
-      throw fetchError;
-    }
-
-    if (!ticket) {
-      throw new Error('Ticket not found');
+    if (fetchError || !ticket) {
+      throw new Error(fetchError?.message || 'Ticket not found');
     }
 
     if (ticket.status === 'used') {
       throw new Error('Ticket has already been used');
     }
 
-    // Update the ticket status
+    // Update ticket status
     const { data: updatedTicket, error: updateError } = await supabase
       .from('event_tickets')
       .update({
@@ -202,8 +207,7 @@ export const validateTicket = async (ticketId: string, validatedBy: string) => {
       .single();
 
     if (updateError) {
-      console.error('Error updating ticket:', updateError);
-      throw updateError;
+      throw new Error(updateError.message);
     }
 
     return {
@@ -212,10 +216,9 @@ export const validateTicket = async (ticketId: string, validatedBy: string) => {
       message: 'Ticket validated successfully'
     };
   } catch (error) {
-    console.error('Error in validateTicket:', error);
     return {
       success: false,
-      message: error.message || 'Failed to validate ticket'
+      message: error instanceof Error ? error.message : 'Failed to validate ticket'
     };
   }
 };

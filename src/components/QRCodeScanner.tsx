@@ -110,8 +110,23 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
+        // Clear the canvas first
+        context.fillStyle = '#000000';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw the video frame
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Enhance contrast
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          const threshold = 128;
+          const value = avg < threshold ? 0 : 255;
+          data[i] = data[i + 1] = data[i + 2] = value;
+        }
+        context.putImageData(imageData, 0, 0);
         
         try {
           const code = jsQRRef.current(imageData.data, imageData.width, imageData.height, {

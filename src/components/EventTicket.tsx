@@ -1,5 +1,5 @@
-import React from 'react';
-import QRCode from 'qrcode.react';
+import React, { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -25,6 +25,27 @@ const EventTicket: React.FC<EventTicketProps> = ({
   status
 }) => {
   const ticketRef = React.useRef<HTMLDivElement>(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    const generateQRCode = async () => {
+      try {
+        const dataUrl = await QRCode.toDataURL(qrCodeData, {
+          errorCorrectionLevel: 'H',
+          margin: 4,
+          width: 200,
+          color: {
+            dark: '#000000',
+            light: '#ffffff',
+          },
+        });
+        setQrCodeDataUrl(dataUrl);
+      } catch (error) {
+        console.error('Error generating QR code:', error);
+      }
+    };
+    generateQRCode();
+  }, [qrCodeData]);
 
   const downloadTicket = async () => {
     if (!ticketRef.current) return;
@@ -90,12 +111,13 @@ const EventTicket: React.FC<EventTicketProps> = ({
           </div>
 
           <div className="flex flex-col items-center justify-center space-y-4">
-            <QRCode
-              value={qrCodeData}
-              size={200}
-              level="H"
-              includeMargin={true}
-            />
+            {qrCodeDataUrl && (
+              <img 
+                src={qrCodeDataUrl} 
+                alt="Ticket QR Code"
+                className="w-[200px] h-[200px]"
+              />
+            )}
             <p className="text-sm text-gray-500 text-center">
               Scan to verify ticket
             </p>

@@ -19,9 +19,9 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const animationFrameRef = useRef<number>();
   const jsQRRef = useRef<any>(null);
   const [isMounted, setIsMounted] = useState(true);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   useEffect(() => {
-    // Dynamically import jsQR
     const loadJsQR = async () => {
       try {
         const jsQR = (await import('jsqr')).default;
@@ -46,18 +46,18 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const startCamera = async () => {
     try {
       setError(null);
+      setDebugInfo('Starting camera...');
       
-      // Get all video devices
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       
-      // Try to get the back camera
+      setDebugInfo(prev => prev + '\nFound ' + videoDevices.length + ' video devices');
+      
       const backCamera = videoDevices.find(device => 
         device.label.toLowerCase().includes('back') || 
         device.label.toLowerCase().includes('rear')
       );
       
-      // Camera constraints
       const constraints = {
         video: {
           facingMode: 'environment',
@@ -73,10 +73,10 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         videoRef.current.srcObject = stream;
         streamRef.current = stream;
         
-        // Wait for video to be ready
         await new Promise((resolve) => {
           if (videoRef.current) {
             videoRef.current.onloadedmetadata = () => {
+              setDebugInfo(prev => prev + '\nVideo metadata loaded');
               resolve(true);
             };
           }
@@ -84,6 +84,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         
         await videoRef.current.play();
         setScanning(true);
+        setDebugInfo(prev => prev + '\nStarting QR scanning');
         scanQRCode();
       }
     } catch (err) {
@@ -106,33 +107,29 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       if (!isMounted) return;
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Set canvas dimensions to match video
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
-        // Draw the video frame to canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Get image data for QR code scanning
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
         
         try {
-          // Attempt to find QR code in frame
           const code = jsQRRef.current(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: "dontInvert",
+            inversionAttempts: "attemptBoth",
           });
           
           if (code) {
-            console.log('QR Code found:', code.data);
+            setDebugInfo(prev => prev + '\nQR Code found: ' + code.data.substring(0, 20) + '...');
+            stopScanning();
             processTicket(code.data);
             return;
           }
         } catch (err) {
           console.error('Error scanning QR code:', err);
+          setDebugInfo(prev => prev + '\nError scanning: ' + err.message);
         }
       }
       
-      // Continue scanning if still active
       if (scanning && isMounted) {
         animationFrameRef.current = requestAnimationFrame(scan);
       }
@@ -159,20 +156,18 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     if (!user || !isMounted) return;
 
     try {
-      console.log('Processing encrypted ticket data:', encryptedData);
+      setDebugInfo(prev => prev + '\nProcessing ticket...');
       
-      // Stop scanning while processing
-      stopScanning();
-      
-      // Validate and decrypt the QR code data
       const ticketData = validateTicketData(encryptedData);
       if (!ticketData) {
+        setDebugInfo(prev => prev + '\nInvalid ticket data');
         toast.error('Invalid ticket data');
-        startCamera(); // Restart scanning
+        startCamera();
         return;
       }
 
-      // Check user permissions
+      setDebugInfo(prev => prev + '\nTicket data validated');
+
       const { data: userProfile, error: userError } = await supabase
         .from('profiles')
         .select('role')
@@ -180,18 +175,20 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .single();
 
       if (userError || !userProfile) {
+        setDebugInfo(prev => prev + '\nFailed to verify permissions');
         toast.error('Failed to verify user permissions');
         startCamera();
         return;
       }
 
       if (!['admin', 'club_admin'].includes(userProfile.role)) {
+        setDebugInfo(prev => prev + '\nInsufficient permissions');
         toast.error('You do not have permission to validate tickets');
         startCamera();
         return;
       }
 
-      // Fetch ticket details
+      setDebugInfo(prev => prev + '\nFetching ticket details...');
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
         .select('*, events(*)')
@@ -199,25 +196,27 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .single();
 
       if (fetchError || !ticket) {
+        setDebugInfo(prev => prev + '\nTicket not found');
         toast.error('Ticket not found');
         startCamera();
         return;
       }
 
-      // Validate ticket
       if (ticket.user_id !== ticketData.userId || ticket.event_id !== ticketData.eventId) {
+        setDebugInfo(prev => prev + '\nTicket data mismatch');
         toast.error('Invalid ticket: Mismatch in ticket data');
         startCamera();
         return;
       }
 
       if (ticket.used_at) {
+        setDebugInfo(prev => prev + '\nTicket already used');
         toast.error('Ticket has already been used');
         startCamera();
         return;
       }
 
-      // Update ticket
+      setDebugInfo(prev => prev + '\nValidating ticket...');
       const { error: updateError } = await supabase
         .from('event_tickets')
         .update({
@@ -227,15 +226,18 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .eq('id', ticketData.ticketId);
 
       if (updateError) {
+        setDebugInfo(prev => prev + '\nValidation failed');
         toast.error('Failed to validate ticket');
         startCamera();
         return;
       }
 
+      setDebugInfo(prev => prev + '\nTicket validated successfully!');
       toast.success('Ticket validated successfully!');
       onClose();
     } catch (error) {
       console.error('Error processing ticket:', error);
+      setDebugInfo(prev => prev + '\nError: ' + error.message);
       toast.error('Failed to process ticket');
       if (isMounted) {
         startCamera();
@@ -294,6 +296,12 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         <p className="text-sm text-gray-500 text-center mt-4">
           Position the QR code within the frame to scan
         </p>
+
+        {import.meta.env.DEV && (
+          <div className="mt-4 p-2 bg-gray-100 rounded text-xs font-mono whitespace-pre-wrap">
+            {debugInfo}
+          </div>
+        )}
       </div>
     </div>
   );

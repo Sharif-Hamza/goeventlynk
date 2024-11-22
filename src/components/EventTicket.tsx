@@ -18,7 +18,7 @@ const EventTicket: React.FC<EventTicketProps> = ({ ticket, showQR = true }) => {
         <div className="flex-1">
           <h3 className="text-xl font-semibold mb-2">{event?.title || 'Event Title'}</h3>
           <p className="text-gray-600 mb-1">
-            {event?.event_date ? formatDate(event.event_date) : 'Date TBD'}
+            {event?.date ? formatDate(event.date) : 'Date TBD'}
           </p>
           <p className="text-gray-600 mb-2">{event?.location || 'Location TBD'}</p>
           <p className="text-sm text-gray-500">Ticket #: {ticket.ticket_number}</p>

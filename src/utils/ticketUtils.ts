@@ -13,7 +13,7 @@ export const getUserTickets = async (userId: string) => {
         event: events!event_tickets_event_id_fkey (
           id,
           title,
-          event_date,
+          date,
           location,
           description,
           image_url
@@ -100,7 +100,7 @@ export const createEventTicket = async (
         event: events!event_tickets_event_id_fkey (
           id,
           title,
-          event_date,
+          date,
           location,
           description,
           image_url
@@ -216,7 +216,7 @@ export const getTicketByNumber = async (ticketNumber: string) => {
       event: events!event_tickets_event_id_fkey (
         id,
         title,
-        event_date,
+        date,
         location,
         description,
         image_url

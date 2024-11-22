@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { validateTicketData } from '../utils/ticketUtils';
+import { X } from 'lucide-react';
 
 interface QRCodeScannerProps {
   onClose: () => void;
@@ -34,7 +35,11 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       
       // Try to get the camera with basic constraints first
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
       });
       
       if (videoRef.current) {
@@ -56,7 +61,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
     const canvas = canvasRef.current;
     const video = videoRef.current;
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
 
     if (!context) return;
 
@@ -66,8 +71,13 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
     const scan = () => {
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Draw video frame to canvas
+        // Draw video frame to canvas with proper orientation
+        context.save();
+        context.translate(canvas.width, 0);
+        context.scale(-1, 1);
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        context.restore();
+        
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
         
         // Scan for QR code
@@ -198,72 +208,46 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     }
   };
 
-  if (!user) {
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg p-6">
-          <p>Please log in to scan tickets.</p>
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-4 w-full max-w-md mx-4">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">Scan Ticket QR Code</h3>
           <button
             onClick={onClose}
-            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">Scan Ticket QR Code</h2>
-          <button
-            onClick={() => {
-              stopScanning();
-              onClose();
-            }}
             className="text-gray-500 hover:text-gray-700"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X size={24} />
           </button>
         </div>
 
-        {error && (
-          <div className="text-red-600 mb-4 text-center p-4">
-            <p>{error}</p>
-            <button
-              onClick={() => {
-                setError(null);
-                startCamera();
-              }}
-              className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            >
-              Retry Camera Access
-            </button>
+        {error ? (
+          <div className="text-red-500 text-center mb-4">
+            {error}
           </div>
-        )}
+        ) : null}
 
-        <div className="relative bg-black rounded-lg overflow-hidden" style={{ minHeight: '350px' }}>
+        <div className="relative aspect-square w-full overflow-hidden rounded-lg">
           <video
             ref={videoRef}
-            className="w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
             playsInline
-            autoPlay
             muted
-            style={{ transform: 'scaleX(-1)' }}
           />
           <canvas
             ref={canvasRef}
-            className="hidden"
+            className="absolute inset-0 w-full h-full"
+            style={{ display: 'none' }}
           />
-          <div className="absolute inset-0 border-2 border-white opacity-50 pointer-events-none">
-            <div className="absolute inset-[25%] border-2 border-blue-500"></div>
+          <div className="absolute inset-0 border-2 border-purple-500 rounded-lg pointer-events-none" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-48 h-48 border-2 border-purple-500 rounded-lg" />
           </div>
         </div>
+
+        <p className="text-sm text-gray-500 text-center mt-4">
+          Position the QR code within the frame to scan
+        </p>
       </div>
     </div>
   );

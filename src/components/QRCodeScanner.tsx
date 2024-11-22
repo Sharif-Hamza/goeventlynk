@@ -18,7 +18,15 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     const initializeScanner = async () => {
       try {
         // Request camera permission first
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const constraints = {
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         stream.getTracks().forEach(track => track.stop()); // Stop the stream after permission check
         setHasPermission(true);
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
+import Barcode from 'react-barcode';
 import { format } from 'date-fns';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -25,26 +25,12 @@ const EventTicket: React.FC<EventTicketProps> = ({
   status
 }) => {
   const ticketRef = React.useRef<HTMLDivElement>(null);
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
   useEffect(() => {
-    const generateQRCode = async () => {
-      try {
-        const dataUrl = await QRCode.toDataURL(qrCodeData, {
-          errorCorrectionLevel: 'H',
-          margin: 4,
-          width: 200,
-          color: {
-            dark: '#000000',
-            light: '#ffffff',
-          },
-        });
-        setQrCodeDataUrl(dataUrl);
-      } catch (error) {
-        console.error('Error generating QR code:', error);
-      }
+    const generateBarcode = async () => {
+      // No need to generate barcode data URL, react-barcode will handle it
     };
-    generateQRCode();
+    generateBarcode();
   }, [qrCodeData]);
 
   const downloadTicket = async () => {
@@ -110,15 +96,17 @@ const EventTicket: React.FC<EventTicketProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-col items-center justify-center space-y-4">
-            {qrCodeDataUrl && (
-              <img 
-                src={qrCodeDataUrl} 
-                alt="Ticket QR Code"
-                className="w-[200px] h-[200px]"
-              />
-            )}
-            <p className="text-sm text-gray-500 text-center">
+          <div className="flex flex-col items-center justify-center p-4 bg-white rounded-lg shadow-md">
+            <Barcode
+              value={qrCodeData}
+              format="CODE128"
+              width={2}
+              height={100}
+              displayValue={true}
+              background="#ffffff"
+              lineColor="#000000"
+            />
+            <p className="text-sm text-gray-500 text-center mt-2">
               Scan to verify ticket
             </p>
           </div>

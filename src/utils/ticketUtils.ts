@@ -143,3 +143,49 @@ export const getUserTickets = async (userId: string) => {
     throw error;
   }
 };
+
+export const generateVerificationCode = () => {
+  // Generate a 6-digit code
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+export const generateTicketData = (ticket: any) => {
+  const verificationCode = generateVerificationCode();
+  const ticketData = {
+    ticketId: ticket.id,
+    userId: ticket.userId,
+    eventId: ticket.eventId,
+    verificationCode,
+    timestamp: new Date().getTime(),
+  };
+  
+  // Store the verification code in the ticket data
+  return {
+    ...ticketData,
+    code: CryptoJS.AES.encrypt(JSON.stringify(ticketData), process.env.VITE_ENCRYPTION_KEY || '').toString()
+  };
+};
+
+export const verifyTicketCode = async (code: string) => {
+  try {
+    // Query the database for the ticket with this verification code
+    const { data: ticket, error } = await supabase
+      .from('tickets')
+      .select('*, events(*), users(*)')
+      .eq('verification_code', code)
+      .single();
+
+    if (error) throw error;
+    if (!ticket) return { valid: false, message: 'Invalid verification code' };
+
+    // Check if ticket is already used
+    if (ticket.status === 'used') {
+      return { valid: false, message: 'Ticket has already been used' };
+    }
+
+    return { valid: true, ticket };
+  } catch (error) {
+    console.error('Error verifying ticket:', error);
+    return { valid: false, message: 'Error verifying ticket' };
+  }
+};

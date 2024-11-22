@@ -100,11 +100,12 @@ const EventTicket: React.FC<EventTicketProps> = ({
             <Barcode
               value={qrCodeData}
               format="CODE128"
-              width={2}
-              height={100}
-              displayValue={true}
+              width={1.5}
+              height={80}
+              displayValue={false}
               background="#ffffff"
               lineColor="#000000"
+              margin={10}
             />
             <p className="text-sm text-gray-500 text-center mt-2">
               Scan to verify ticket

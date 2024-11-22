@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { validateTicketData } from '../utils/ticketUtils';
 import { X } from 'lucide-react';
-import { BrowserMultiFormatReader, DecodeHint } from '@zxing/library';
+import { BrowserMultiFormatReader } from '@zxing/library';
 
 interface QRCodeScannerProps {
   onClose: () => void;
@@ -19,9 +19,10 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
 
   useEffect(() => {
-    const hints = new Map();
-    hints.set(DecodeHint.POSSIBLE_FORMATS, ['QR_CODE']);
-    readerRef.current = new BrowserMultiFormatReader(hints);
+    readerRef.current = new BrowserMultiFormatReader();
+    readerRef.current.setHints(new Map([
+      ['possibleFormats', ['QR_CODE']]
+    ]));
 
     const startScanning = async () => {
       try {
@@ -30,7 +31,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         
         if (!videoRef.current) return;
         
-        await readerRef.current.decodeFromConstraints(
+        await readerRef.current?.decodeFromConstraints(
           {
             audio: false,
             video: {

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Html5Qrcode, Html5QrcodeScanner } from 'html5-qrcode';
 import { validateTicketData } from '../utils/ticketUtils';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
@@ -9,76 +9,19 @@ interface QRCodeScannerProps {
 }
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
-  const [scanning, setScanning] = useState(true);
-  const [qrScanner, setQrScanner] = useState<Html5Qrcode | null>(null);
+  const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null);
 
-  useEffect(() => {
-    const scanner = new Html5Qrcode('qr-reader');
-    setQrScanner(scanner);
-
-    return () => {
-      if (scanner) {
-        scanner.stop().catch(console.error);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const startScanning = async () => {
-      if (!qrScanner) return;
-
-      try {
-        const cameras = await Html5Qrcode.getCameras();
-        if (!cameras || cameras.length === 0) {
-          toast.error('No cameras found');
-          return;
-        }
-
-        // Try to use the back camera first
-        const cameraId = cameras.find(camera => 
-          camera.label.toLowerCase().includes('back') || 
-          camera.label.toLowerCase().includes('rear')
-        )?.id || cameras[0].id;
-
-        await qrScanner.start(
-          { deviceId: cameraId },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1,
-          },
-          handleScan,
-          (error) => {
-            console.error('QR Scanner error:', error);
-          }
-        );
-      } catch (err) {
-        console.error('Failed to start scanner:', err);
-        toast.error('Failed to access camera. Please check camera permissions.');
-      }
-    };
-
-    if (qrScanner && scanning) {
-      startScanning();
-    }
-
-    return () => {
-      if (qrScanner) {
-        qrScanner.stop().catch(console.error);
-      }
-    };
-  }, [qrScanner, scanning]);
-
-  const handleScan = async (decodedText: string) => {
-    if (!scanning || !qrScanner) return;
-    setScanning(false);
+  const onScanSuccess = useCallback(async (decodedText: string) => {
+    if (!scanner) return;
     
     try {
-      await qrScanner.stop();
+      // Stop scanning immediately after successful scan
+      await scanner.pause();
       
       const ticketData = validateTicketData(decodedText);
       if (!ticketData) {
         toast.error('Invalid ticket QR code');
+        scanner.resume();
         return;
       }
 
@@ -91,11 +34,13 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (fetchError || !ticket) {
         toast.error('Ticket not found');
+        scanner.resume();
         return;
       }
 
       if (ticket.used_at) {
         toast.error('Ticket has already been used');
+        scanner.resume();
         return;
       }
 
@@ -107,40 +52,90 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (updateError) {
         toast.error('Failed to validate ticket');
+        scanner.resume();
         return;
       }
 
       toast.success('Ticket validated successfully!');
+      scanner.clear();
       onClose();
     } catch (error) {
       console.error('Error handling scan:', error);
       toast.error('Failed to process ticket');
+      scanner.resume();
     }
-  };
+  }, [scanner, onClose]);
+
+  const onScanFailure = useCallback((error: any) => {
+    // Only log specific errors, not the common "No QR code found" error
+    if (error?.message?.includes('No QR code found')) {
+      return;
+    }
+    console.warn('QR Scan error:', error);
+  }, []);
+
+  useEffect(() => {
+    // Configuration for the scanner
+    const config = {
+      fps: 10,
+      qrbox: {
+        width: 250,
+        height: 250
+      },
+      aspectRatio: 1.0,
+      showTorchButtonIfSupported: true,
+      showZoomSliderIfSupported: true,
+      defaultZoomValueIfSupported: 2,
+    };
+
+    // Create scanner instance
+    const qrScanner = new Html5QrcodeScanner(
+      "qr-reader",
+      config,
+      /* verbose= */ false
+    );
+
+    // Start scanning
+    qrScanner.render(onScanSuccess, onScanFailure);
+    setScanner(qrScanner);
+
+    // Cleanup function
+    return () => {
+      if (qrScanner) {
+        qrScanner.clear().catch(console.error);
+      }
+    };
+  }, [onScanSuccess, onScanFailure]);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-4 rounded-lg w-full max-w-md mx-4">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">Scan QR Code</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
-          >
-            Close
-          </button>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg w-full max-w-md">
+        <div className="p-4 border-b">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold">Scan QR Code</h2>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
         </div>
-        <div 
-          id="qr-reader" 
-          className="w-full aspect-square bg-gray-100 rounded-lg overflow-hidden"
-          style={{ 
-            maxWidth: '100%',
-            margin: '0 auto',
-          }}
-        />
-        <p className="text-sm text-gray-600 mt-4 text-center">
-          Position the QR code within the frame to scan
-        </p>
+        
+        <div className="p-4">
+          <div 
+            id="qr-reader" 
+            className="overflow-hidden rounded-lg"
+            style={{
+              width: '100%',
+              minHeight: '300px'
+            }}
+          />
+          <p className="text-sm text-gray-600 mt-4 text-center">
+            Position the QR code within the frame to scan
+          </p>
+        </div>
       </div>
     </div>
   );

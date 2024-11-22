@@ -6,16 +6,16 @@ const ENCRYPTION_KEY = import.meta.env.VITE_TICKET_ENCRYPTION_KEY || 'eventlynk-
 
 export interface TicketData {
   ticketId: string;
-  userId: string;
   eventId: string;
+  userId: string;
   ticketNumber: string;
   timestamp: number;
 }
 
 export const generateTicketNumber = () => {
-  // Generate a random 8-digit number
-  const randomNum = Math.floor(10000000 + Math.random() * 90000000);
-  return `TKT${randomNum}`;
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `TKT-${timestamp}-${random}`;
 };
 
 export const encryptTicketData = (data: TicketData): string => {
@@ -29,17 +29,19 @@ export const decryptTicketData = (encryptedData: string): TicketData => {
   return JSON.parse(decryptedString);
 };
 
-export const generateQRCodeData = (ticketData: TicketData): string => {
-  return encryptTicketData(ticketData);
-};
-
 export const validateTicketData = (encryptedData: string): TicketData | null => {
   try {
-    return decryptTicketData(encryptedData);
+    const decrypted = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
+    const jsonString = decrypted.toString(CryptoJS.enc.Utf8);
+    return JSON.parse(jsonString);
   } catch (error) {
     console.error('Error validating ticket data:', error);
     return null;
   }
+};
+
+export const generateQRCodeData = (ticketData: TicketData): string => {
+  return encryptTicketData(ticketData);
 };
 
 export const createEventTicket = async (
@@ -53,8 +55,8 @@ export const createEventTicket = async (
     const ticketNumber = generateTicketNumber();
     const ticketData: TicketData = {
       ticketId: crypto.randomUUID(),
-      userId,
       eventId,
+      userId,
       ticketNumber,
       timestamp: Date.now(),
     };
@@ -119,6 +121,46 @@ export const createEventTicket = async (
     return ticketWithDetails || ticket;
   } catch (error) {
     console.error('Error in createEventTicket:', error);
+    throw error;
+  }
+};
+
+export const createTicket = async (supabase: SupabaseClient, eventId: string, userId: string) => {
+  try {
+    const ticketNumber = generateTicketNumber();
+    
+    const { data: ticket, error } = await supabase
+      .from('event_tickets')
+      .insert([
+        {
+          event_id: eventId,
+          user_id: userId,
+          ticket_number: ticketNumber,
+          status: 'active',
+          created_at: new Date().toISOString(),
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Create encrypted ticket data
+    const ticketData: TicketData = {
+      ticketId: ticket.id,
+      eventId: ticket.event_id,
+      userId: ticket.user_id,
+      ticketNumber: ticket.ticket_number,
+      timestamp: Date.now()
+    };
+
+    // Return both the ticket and its encrypted data
+    return {
+      ...ticket,
+      encryptedData: encryptTicketData(ticketData)
+    };
+  } catch (error) {
+    console.error('Error creating ticket:', error);
     throw error;
   }
 };

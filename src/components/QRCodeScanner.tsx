@@ -11,14 +11,28 @@ interface QRCodeScannerProps {
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const { user } = useAuth();
+
+  const requestCameraPermission = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(track => track.stop());
+      setHasPermission(true);
+      return true;
+    } catch (error) {
+      console.error('Camera permission error:', error);
+      setHasPermission(false);
+      return false;
+    }
+  }, []);
 
   const onScanSuccess = useCallback(async (decodedText: string) => {
     if (!scanner || !user) return;
     
     try {
       // Stop scanning immediately after successful scan
-      await scanner.pause();
+      await scanner.pause(true);
 
       let ticketId = decodedText;
       
@@ -118,37 +132,50 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   }, []);
 
   useEffect(() => {
-    // Configuration for the scanner
-    const config = {
-      fps: 10,
-      qrbox: {
-        width: 250,
-        height: 250
-      },
-      aspectRatio: 1.0,
-      showTorchButtonIfSupported: true,
-      showZoomSliderIfSupported: true,
-      defaultZoomValueIfSupported: 2,
-    };
-
-    // Create scanner instance
-    const qrScanner = new Html5QrcodeScanner(
-      "qr-reader",
-      config,
-      /* verbose= */ false
-    );
-
-    // Start scanning
-    qrScanner.render(onScanSuccess, onScanFailure);
-    setScanner(qrScanner);
-
-    // Cleanup function
-    return () => {
-      if (qrScanner) {
-        qrScanner.clear().catch(console.error);
+    const initializeScanner = async () => {
+      const hasPermissions = await requestCameraPermission();
+      if (!hasPermissions) {
+        toast.error('Camera permission is required to scan tickets');
+        return;
       }
+
+      // Configuration for the scanner
+      const config = {
+        fps: 10,
+        qrbox: {
+          width: 250,
+          height: 250
+        },
+        aspectRatio: 1.0,
+        showTorchButtonIfSupported: true,
+        showZoomSliderIfSupported: true,
+        defaultZoomValueIfSupported: 2,
+        videoConstraints: {
+          facingMode: { ideal: 'environment' }
+        }
+      };
+
+      // Create scanner instance
+      const qrScanner = new Html5QrcodeScanner(
+        "qr-reader",
+        config,
+        /* verbose= */ false
+      );
+
+      // Start scanning
+      qrScanner.render(onScanSuccess, onScanFailure);
+      setScanner(qrScanner);
+
+      // Cleanup function
+      return () => {
+        if (qrScanner) {
+          qrScanner.clear().catch(console.error);
+        }
+      };
     };
-  }, [onScanSuccess, onScanFailure]);
+
+    initializeScanner();
+  }, [onScanSuccess, onScanFailure, requestCameraPermission]);
 
   if (!user) {
     return (
@@ -183,17 +210,34 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         </div>
         
         <div className="p-4">
+          {hasPermission === false && (
+            <div className="text-center p-4">
+              <p className="text-red-600 mb-4">Camera access is required to scan tickets.</p>
+              <p className="text-sm text-gray-600">
+                Please enable camera access in your browser settings and try again.
+              </p>
+              <button
+                onClick={() => requestCameraPermission()}
+                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Request Camera Access
+              </button>
+            </div>
+          )}
           <div 
             id="qr-reader" 
             className="overflow-hidden rounded-lg"
             style={{
               width: '100%',
-              minHeight: '300px'
+              minHeight: '300px',
+              display: hasPermission === false ? 'none' : 'block'
             }}
           />
-          <p className="text-sm text-gray-600 mt-4 text-center">
-            Position the QR code within the frame to scan
-          </p>
+          {hasPermission !== false && (
+            <p className="text-sm text-gray-600 mt-4 text-center">
+              Position the QR code within the frame to scan
+            </p>
+          )}
         </div>
       </div>
     </div>

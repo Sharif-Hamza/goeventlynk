@@ -22,6 +22,7 @@ export default defineConfig({
         start_url: '/',
         orientation: 'portrait',
         categories: ['events', 'tickets', 'management'],
+        permissions: ['camera'],
         icons: [
           {
             src: '/pwa-192x192.png',

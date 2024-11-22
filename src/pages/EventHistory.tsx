@@ -2,10 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { format } from 'date-fns';
 import EventTicket from '../components/EventTicket';
-import { generateQRCodeData } from '../utils/ticketUtils';
-import toast from 'react-hot-toast';
 
 export default function EventHistory() {
   const { user } = useAuth();
@@ -17,8 +14,18 @@ export default function EventHistory() {
       if (!user) return null;
 
       const { data, error } = await supabase
-        .from('event_tickets_with_details')
-        .select()
+        .from('event_tickets')
+        .select(`
+          *,
+          event: events!event_tickets_event_id_fkey (
+            id,
+            title,
+            event_date,
+            location,
+            description,
+            image_url
+          )
+        `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
@@ -59,15 +66,7 @@ export default function EventHistory() {
         <div className="space-y-6">
           {tickets.map((ticket) => (
             <div key={ticket.id} className="bg-white rounded-lg shadow overflow-hidden">
-              <EventTicket
-                eventName={ticket.event_title}
-                eventDate={ticket.event_date}
-                eventLocation={ticket.event_location}
-                ticketNumber={ticket.ticket_number}
-                qrCodeData={ticket.qr_code_data}
-                userName={ticket.full_name || user?.email || ''}
-                status={ticket.status}
-              />
+              <EventTicket ticket={ticket} />
             </div>
           ))}
         </div>

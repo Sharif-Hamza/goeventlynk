@@ -14,8 +14,18 @@ export default function EventHistory() {
       if (!user) return null;
 
       const { data, error } = await supabase
-        .from('event_tickets_with_details')
-        .select('*')
+        .from('event_tickets')
+        .select(`
+          *,
+          event: events!event_tickets_event_id_fkey (
+            id,
+            title,
+            event_date,
+            location,
+            description,
+            image_url
+          )
+        `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 

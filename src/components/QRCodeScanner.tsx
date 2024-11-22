@@ -1,204 +1,138 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Html5Qrcode, Html5QrcodeError } from 'html5-qrcode';
+import React, { useEffect, useRef, useState } from 'react';
+import { BrowserQRCodeReader, IScannerControls } from '@zxing/browser';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { useAuth } from '../context/AuthContext';
 
 interface QRCodeScannerProps {
   onClose: () => void;
 }
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
   const { user } = useAuth();
 
-  const requestCameraPermission = useCallback(async () => {
-    try {
-      // First try to get the camera stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' }
-        }
-      });
-
-      // Stop the stream immediately after getting permission
-      stream.getTracks().forEach(track => track.stop());
-      setHasPermission(true);
-      return true;
-    } catch (error) {
-      console.error('Camera permission error:', error);
-      setHasPermission(false);
-      return false;
-    }
-  }, []);
-
-  const initializeScanner = useCallback(async () => {
-    if (!scannerRef.current) {
-      scannerRef.current = new Html5Qrcode('qr-reader', {
-        verbose: false,
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
-        }
-      });
-    }
-
-    if (isScanning) {
-      return;
-    }
-
-    try {
-      const devices = await Html5Qrcode.getCameras();
-      if (!devices || devices.length === 0) {
-        toast.error('No cameras found on your device');
-        return;
-      }
-
-      // Try to use the back camera first
-      const cameraId = devices.find(device => 
-        device.label.toLowerCase().includes('back') || 
-        device.label.toLowerCase().includes('rear')
-      )?.id || devices[0].id;
-
-      await scannerRef.current.start(
-        cameraId,
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: window.innerHeight > window.innerWidth ? 1 : 1.777,
-        },
-        onScanSuccess,
-        (errorMessage: string | Html5QrcodeError) => {
-          // Only log non-QR code errors
-          if (typeof errorMessage === 'string' && !errorMessage.includes('No QR code found')) {
-            console.warn(errorMessage);
-          }
-        }
-      );
-
-      setIsScanning(true);
-    } catch (err) {
-      console.error('Scanner initialization error:', err);
-      toast.error('Failed to start camera. Please check permissions and try again.');
-      setIsScanning(false);
-    }
-  }, [isScanning]);
-
-  const onScanSuccess = async (decodedText: string) => {
-    if (!scannerRef.current || !user) return;
-
-    try {
-      // Pause scanning while processing
-      await scannerRef.current.pause(true);
-
-      let ticketId = decodedText;
-      
-      try {
-        const parsedData = JSON.parse(decodedText);
-        ticketId = parsedData.ticketId || parsedData.id || decodedText;
-      } catch (e) {
-        // If parsing fails, use the raw text
-      }
-
-      // Verify user permissions
-      const { data: userProfile, error: userError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userProfile) {
-        toast.error('Failed to verify user permissions');
-        await scannerRef.current.resume();
-        return;
-      }
-
-      if (!['admin', 'club_admin'].includes(userProfile.role)) {
-        toast.error('You do not have permission to validate tickets');
-        await scannerRef.current.resume();
-        return;
-      }
-
-      // Fetch ticket details
-      const { data: ticket, error: fetchError } = await supabase
-        .from('event_tickets')
-        .select('*, events(*)')
-        .eq('id', ticketId)
-        .single();
-
-      if (fetchError || !ticket) {
-        toast.error('Ticket not found');
-        await scannerRef.current.resume();
-        return;
-      }
-
-      // Verify club admin permissions
-      if (userProfile.role === 'club_admin') {
-        const { data: clubAdmin } = await supabase
-          .from('club_admins')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('club_id', ticket.events.club_id)
-          .single();
-
-        if (!clubAdmin) {
-          toast.error('You do not have permission to validate tickets for this event');
-          await scannerRef.current.resume();
-          return;
-        }
-      }
-
-      if (ticket.used_at) {
-        toast.error('Ticket has already been used');
-        await scannerRef.current.resume();
-        return;
-      }
-
-      // Update ticket
-      const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({
-          used_at: new Date().toISOString(),
-          validated_by: user.id
-        })
-        .eq('id', ticketId);
-
-      if (updateError) {
-        toast.error('Failed to validate ticket');
-        await scannerRef.current.resume();
-        return;
-      }
-
-      toast.success('Ticket validated successfully!');
-      onClose();
-    } catch (error) {
-      console.error('Error handling scan:', error);
-      toast.error('Failed to process ticket');
-      if (scannerRef.current) {
-        await scannerRef.current.resume();
-      }
-    }
-  };
-
   useEffect(() => {
-    const init = async () => {
-      const hasPermissions = await requestCameraPermission();
-      if (hasPermissions) {
-        await initializeScanner();
+    const initializeScanner = async () => {
+      try {
+        // First check for camera permission
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+        setHasPermission(true);
+
+        // Stop the test stream
+        stream.getTracks().forEach(track => track.stop());
+
+        if (!videoRef.current) return;
+
+        const codeReader = new BrowserQRCodeReader();
+        
+        controlsRef.current = await codeReader.decodeFromVideoDevice(
+          undefined, // Let the library choose the best camera
+          videoRef.current,
+          async (result) => {
+            if (!result || !user) return;
+
+            try {
+              let ticketId = result.getText();
+
+              // Try to parse JSON if the QR code contains JSON data
+              try {
+                const parsedData = JSON.parse(ticketId);
+                ticketId = parsedData.ticketId || parsedData.id || ticketId;
+              } catch (e) {
+                // If parsing fails, use the raw text
+              }
+
+              // Check user permissions
+              const { data: userProfile, error: userError } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', user.id)
+                .single();
+
+              if (userError || !userProfile) {
+                toast.error('Failed to verify user permissions');
+                return;
+              }
+
+              if (!['admin', 'club_admin'].includes(userProfile.role)) {
+                toast.error('You do not have permission to validate tickets');
+                return;
+              }
+
+              // Fetch ticket details
+              const { data: ticket, error: fetchError } = await supabase
+                .from('event_tickets')
+                .select('*, events(*)')
+                .eq('id', ticketId)
+                .single();
+
+              if (fetchError || !ticket) {
+                toast.error('Ticket not found');
+                return;
+              }
+
+              // Check club admin permissions
+              if (userProfile.role === 'club_admin') {
+                const { data: clubAdmin } = await supabase
+                  .from('club_admins')
+                  .select('*')
+                  .eq('user_id', user.id)
+                  .eq('club_id', ticket.events.club_id)
+                  .single();
+
+                if (!clubAdmin) {
+                  toast.error('You do not have permission to validate tickets for this event');
+                  return;
+                }
+              }
+
+              if (ticket.used_at) {
+                toast.error('Ticket has already been used');
+                return;
+              }
+
+              // Update ticket
+              const { error: updateError } = await supabase
+                .from('event_tickets')
+                .update({
+                  used_at: new Date().toISOString(),
+                  validated_by: user.id
+                })
+                .eq('id', ticketId);
+
+              if (updateError) {
+                toast.error('Failed to validate ticket');
+                return;
+              }
+
+              toast.success('Ticket validated successfully!');
+              onClose();
+            } catch (error) {
+              console.error('Error processing ticket:', error);
+              toast.error('Failed to process ticket');
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Failed to initialize scanner:', error);
+        setHasPermission(false);
+        toast.error('Failed to access camera. Please check permissions and try again.');
       }
     };
 
-    init();
+    initializeScanner();
 
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(console.error);
-        scannerRef.current = null;
+      if (controlsRef.current) {
+        controlsRef.current.stop();
       }
-      setIsScanning(false);
     };
-  }, [initializeScanner, requestCameraPermission]);
+  }, [user, onClose]);
 
   if (!user) {
     return (
@@ -233,30 +167,39 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         </div>
         
         <div className="p-4">
-          {hasPermission === false && (
+          {hasPermission === false ? (
             <div className="text-center p-4">
               <p className="text-red-600 mb-4">Camera access is required to scan tickets.</p>
               <p className="text-sm text-gray-600 mb-4">
                 Please enable camera access in your browser settings and try again.
               </p>
               <button
-                onClick={() => requestCameraPermission().then(initializeScanner)}
+                onClick={() => window.location.reload()}
                 className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
               >
-                Request Camera Access
+                Try Again
               </button>
             </div>
+          ) : (
+            <div className="relative">
+              <video 
+                ref={videoRef}
+                className="w-full rounded-lg"
+                style={{ 
+                  maxHeight: '70vh',
+                  backgroundColor: '#000000'
+                }}
+              />
+              <div className="absolute inset-0 border-2 border-blue-500 opacity-50 pointer-events-none">
+                <div className="absolute inset-0 border-4 border-blue-500 rounded-lg"></div>
+                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-500 rounded-tl"></div>
+                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-500 rounded-tr"></div>
+                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-500 rounded-bl"></div>
+                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-500 rounded-br"></div>
+              </div>
+            </div>
           )}
-          <div 
-            id="qr-reader" 
-            className="overflow-hidden rounded-lg"
-            style={{ 
-              width: '100%', 
-              minHeight: '300px',
-              display: hasPermission === false ? 'none' : 'block'
-            }}
-          />
-          {hasPermission !== false && (
+          {hasPermission && (
             <p className="text-sm text-gray-600 mt-4 text-center">
               Position the QR code within the frame to scan
             </p>

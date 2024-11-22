@@ -22,7 +22,6 @@ export default defineConfig({
         start_url: '/',
         orientation: 'portrait',
         categories: ['events', 'tickets', 'management'],
-        permissions: ['camera'],
         icons: [
           {
             src: '/pwa-192x192.png',
@@ -65,6 +64,7 @@ export default defineConfig({
   ],
   server: {
     https: true,
-    port: 5173
+    port: 5173,
+    host: true // Allow access from mobile devices on local network
   }
 });

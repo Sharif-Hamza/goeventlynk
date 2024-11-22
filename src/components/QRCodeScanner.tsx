@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 import { validateTicketData } from '../utils/ticketUtils';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
@@ -10,13 +10,17 @@ interface QRCodeScannerProps {
 }
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
-  const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null);
+  const [scanner, setScanner] = useState<Html5Qrcode | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const { user } = useAuth();
 
   const requestCameraPermission = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: { ideal: 'environment' } 
+        } 
+      });
       stream.getTracks().forEach(track => track.stop());
       setHasPermission(true);
       return true;
@@ -32,7 +36,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     
     try {
       // Stop scanning immediately after successful scan
-      await scanner.pause(true);
+      await scanner.stop();
 
       let ticketId = decodedText;
       
@@ -53,13 +57,13 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (userError || !userProfile) {
         toast.error('Failed to verify user permissions');
-        scanner.resume();
+        await scanner.start();
         return;
       }
 
       if (!['admin', 'club_admin'].includes(userProfile.role)) {
         toast.error('You do not have permission to validate tickets');
-        scanner.resume();
+        await scanner.start();
         return;
       }
 
@@ -72,7 +76,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (fetchError || !ticket) {
         toast.error('Ticket not found');
-        scanner.resume();
+        await scanner.start();
         return;
       }
 
@@ -87,14 +91,14 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
         if (!clubAdmin) {
           toast.error('You do not have permission to validate tickets for this event');
-          scanner.resume();
+          await scanner.start();
           return;
         }
       }
 
       if (ticket.used_at) {
         toast.error('Ticket has already been used');
-        scanner.resume();
+        await scanner.start();
         return;
       }
 
@@ -109,27 +113,18 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (updateError) {
         toast.error('Failed to validate ticket');
-        scanner.resume();
+        await scanner.start();
         return;
       }
 
       toast.success('Ticket validated successfully!');
-      scanner.clear();
       onClose();
     } catch (error) {
       console.error('Error handling scan:', error);
       toast.error('Failed to process ticket');
-      scanner.resume();
+      await scanner.start();
     }
   }, [scanner, onClose, user]);
-
-  const onScanFailure = useCallback((error: any) => {
-    // Only log specific errors, not the common "No QR code found" error
-    if (error?.message?.includes('No QR code found')) {
-      return;
-    }
-    console.warn('QR Scan error:', error);
-  }, []);
 
   useEffect(() => {
     const initializeScanner = async () => {
@@ -139,43 +134,52 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         return;
       }
 
-      // Configuration for the scanner
-      const config = {
-        fps: 10,
-        qrbox: {
-          width: 250,
-          height: 250
-        },
-        aspectRatio: 1.0,
-        showTorchButtonIfSupported: true,
-        showZoomSliderIfSupported: true,
-        defaultZoomValueIfSupported: 2,
-        videoConstraints: {
-          facingMode: { ideal: 'environment' }
+      const html5QrCode = new Html5Qrcode("qr-reader");
+      
+      try {
+        const cameras = await Html5Qrcode.getCameras();
+        if (!cameras || cameras.length === 0) {
+          toast.error('No cameras found on your device');
+          return;
         }
-      };
 
-      // Create scanner instance
-      const qrScanner = new Html5QrcodeScanner(
-        "qr-reader",
-        config,
-        /* verbose= */ false
-      );
+        // Try to use the back camera first
+        const camera = cameras.find(cam => 
+          cam.label.toLowerCase().includes('back') || 
+          cam.label.toLowerCase().includes('rear')
+        ) || cameras[0];
 
-      // Start scanning
-      qrScanner.render(onScanSuccess, onScanFailure);
-      setScanner(qrScanner);
+        await html5QrCode.start(
+          camera.id,
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          onScanSuccess,
+          (errorMessage) => {
+            // Ignore "No QR code found" messages
+            if (!errorMessage.includes('No QR code found')) {
+              console.warn(errorMessage);
+            }
+          }
+        );
 
-      // Cleanup function
-      return () => {
-        if (qrScanner) {
-          qrScanner.clear().catch(console.error);
-        }
-      };
+        setScanner(html5QrCode);
+      } catch (err) {
+        console.error('Error starting scanner:', err);
+        toast.error('Failed to start camera. Please check permissions and try again.');
+      }
     };
 
     initializeScanner();
-  }, [onScanSuccess, onScanFailure, requestCameraPermission]);
+
+    return () => {
+      if (scanner) {
+        scanner.stop().catch(console.error);
+      }
+    };
+  }, [onScanSuccess, requestCameraPermission]);
 
   if (!user) {
     return (

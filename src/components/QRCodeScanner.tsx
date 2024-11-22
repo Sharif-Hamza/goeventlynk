@@ -17,6 +17,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>('');
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const [manualInput, setManualInput] = useState<string>('');
 
   useEffect(() => {
     const initializeScanner = async () => {
@@ -46,7 +47,6 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               processTicket(result.getText());
             }
             if (err && scanning) {
-              // Only update debug info occasionally to avoid flooding
               if (Math.random() < 0.1) {
                 setDebugInfo(prev => prev + '\nScanning...');
               }
@@ -70,6 +70,79 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     };
   }, []);
 
+  const verifyTicketByNumber = async (ticketNumber: string) => {
+    if (!user) return;
+
+    try {
+      setDebugInfo('Verifying ticket number: ' + ticketNumber);
+
+      const { data: ticket, error: fetchError } = await supabase
+        .from('event_tickets')
+        .select('*, events(*)')
+        .eq('ticket_number', ticketNumber)
+        .single();
+
+      if (fetchError || !ticket) {
+        setDebugInfo(prev => prev + '\nTicket not found');
+        toast.error('Ticket not found');
+        return;
+      }
+
+      const { data: userProfile, error: userError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (userError || !userProfile) {
+        setDebugInfo(prev => prev + '\nFailed to verify permissions');
+        toast.error('Failed to verify user permissions');
+        return;
+      }
+
+      if (!['admin', 'club_admin'].includes(userProfile.role)) {
+        setDebugInfo(prev => prev + '\nInsufficient permissions');
+        toast.error('Insufficient permissions to validate tickets');
+        return;
+      }
+
+      if (ticket.used_at) {
+        setDebugInfo(prev => prev + '\nTicket already used');
+        toast.error('Ticket has already been used');
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('event_tickets')
+        .update({
+          used_at: new Date().toISOString(),
+          validated_by: user.id
+        })
+        .eq('id', ticket.id);
+
+      if (updateError) {
+        setDebugInfo(prev => prev + '\nValidation failed');
+        toast.error('Failed to validate ticket');
+        return;
+      }
+
+      setDebugInfo(prev => prev + '\nTicket validated successfully!');
+      toast.success('Ticket validated successfully!');
+      onClose();
+    } catch (error) {
+      console.error('Error verifying ticket:', error);
+      setDebugInfo(prev => prev + '\nError: ' + error.message);
+      toast.error('Failed to verify ticket');
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (manualInput.trim()) {
+      verifyTicketByNumber(manualInput.trim());
+    }
+  };
+
   const processTicket = async (encryptedData: string) => {
     if (!user) return;
 
@@ -85,7 +158,6 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       setDebugInfo(prev => prev + '\nTicket data validated');
 
-      // Verify user permissions
       const { data: userProfile, error: userError } = await supabase
         .from('profiles')
         .select('role')
@@ -106,7 +178,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       setDebugInfo(prev => prev + '\nFetching ticket details...');
       const { data: ticket, error: fetchError } = await supabase
-        .from('tickets')
+        .from('event_tickets')
         .select('*')
         .eq('id', ticketData.ticketId)
         .single();
@@ -131,8 +203,11 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       setDebugInfo(prev => prev + '\nValidating ticket...');
       const { error: updateError } = await supabase
-        .from('tickets')
-        .update({ used_at: new Date().toISOString() })
+        .from('event_tickets')
+        .update({
+          used_at: new Date().toISOString(),
+          validated_by: user.id
+        })
         .eq('id', ticketData.ticketId);
 
       if (updateError) {
@@ -155,7 +230,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white p-4 rounded-lg shadow-lg w-full max-w-md">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Scan Ticket Barcode</h3>
+          <h3 className="text-lg font-semibold">Verify Ticket</h3>
           <button
             onClick={() => {
               if (readerRef.current) {
@@ -168,6 +243,28 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
           >
             <X size={24} />
           </button>
+        </div>
+
+        <form onSubmit={handleManualSubmit} className="mb-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="Enter ticket number"
+              className="flex-1 p-2 border rounded"
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+            >
+              Verify
+            </button>
+          </div>
+        </form>
+
+        <div className="text-center text-sm text-gray-500 mb-4">
+          - OR -
         </div>
 
         {error ? (
@@ -191,7 +288,6 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               muted
             />
             <div className="absolute inset-0 flex items-center justify-center">
-              {/* Narrower scanning area for barcodes */}
               <div className="w-full h-16 border-2 border-purple-500 bg-purple-500 bg-opacity-10">
                 <div className="w-full h-full border-l-2 border-r-2 border-purple-500 animate-pulse" />
               </div>

@@ -7,13 +7,13 @@ const ENCRYPTION_KEY = import.meta.env.VITE_TICKET_ENCRYPTION_KEY || 'eventlynk-
 export const getUserTickets = async (userId: string) => {
   try {
     const { data: tickets, error } = await supabase
-      .from('event_tickets')
+      .from('event_tickets_with_details')
       .select(`
         *,
-        event:event_id (
+        events (
           id,
-          title,
-          event_date,
+          name,
+          date,
           location,
           description,
           image_url
@@ -97,13 +97,13 @@ export const createEventTicket = async (
 
     // Get ticket with details
     const { data: ticketWithDetails, error: detailsError } = await supabase
-      .from('event_tickets')
+      .from('event_tickets_with_details')
       .select(`
         *,
-        event:event_id (
+        events (
           id,
-          title,
-          event_date,
+          name,
+          date,
           location,
           description,
           image_url
@@ -179,13 +179,13 @@ export const validateTicket = async (ticketId: string, validatedBy: string) => {
 
 export const getTicketByNumber = async (ticketNumber: string) => {
   return await supabase
-    .from('event_tickets')
+    .from('event_tickets_with_details')
     .select(`
       *,
-      event:event_id (
+      events (
         id,
-        title,
-        event_date,
+        name,
+        date,
         location,
         description,
         image_url

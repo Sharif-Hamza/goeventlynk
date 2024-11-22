@@ -4,209 +4,74 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { validateTicketData } from '../utils/ticketUtils';
 import { X } from 'lucide-react';
-import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType, NotFoundException } from '@zxing/library';
+import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/library';
 
 interface QRCodeScannerProps {
   onClose: () => void;
 }
 
-const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
+export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(true);
   const [debugInfo, setDebugInfo] = useState<string>('');
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [manualInput, setManualInput] = useState<string>('');
 
   useEffect(() => {
-    if (!scanning) return;
-
     const initializeScanner = async () => {
       try {
-        setDebugInfo('Requesting camera permission...');
+        readerRef.current = new BrowserMultiFormatReader();
+        readerRef.current.formats = [BarcodeFormat.CODE_128];
         
-        // First, explicitly request camera permission
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }
-        });
+        setScanning(true);
+        setDebugInfo('Starting scanner...');
         
-        // If we got here, permission was granted
-        setDebugInfo(prev => prev + '\nCamera permission granted');
-
-        // Initialize the barcode reader
-        const codeReader = new BrowserMultiFormatReader();
-        readerRef.current = codeReader;
-
-        // Configure for Code128 format
-        codeReader.setHints(new Map([[DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]]]));
-
-        // Get available video devices
-        const videoInputDevices = await codeReader.listVideoInputDevices();
-        setDebugInfo(prev => prev + '\nFound cameras: ' + videoInputDevices.map(device => device.label).join(', '));
-
-        // Select the back camera if available, otherwise use the first camera
-        const selectedDevice = videoInputDevices.find(device => 
-          device.label.toLowerCase().includes('back') || 
-          device.label.toLowerCase().includes('environment')
-        ) || videoInputDevices[0];
-
-        if (!videoRef.current) {
-          throw new Error('Video element not found');
-        }
-
-        // Stop the initial stream to avoid conflicts
-        stream.getTracks().forEach(track => track.stop());
-
-        // Start the barcode reader with the selected device
-        await codeReader.decodeFromConstraints(
+        if (!videoRef.current) return;
+        
+        await readerRef.current.decodeFromConstraints(
           {
+            audio: false,
             video: {
-              deviceId: selectedDevice?.deviceId,
-              facingMode: { ideal: 'environment' },
-              width: { min: 640, ideal: 1280, max: 1920 },
-              height: { min: 480, ideal: 720, max: 1080 },
-              aspectRatio: { ideal: 1.7777777778 },
-              frameRate: { ideal: 30 }
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              aspectRatio: { ideal: 1.7777777778 }
             }
           },
           videoRef.current,
-          async (result, error) => {
+          (result, err) => {
             if (result) {
-              const scannedData = result.getText();
-              setDebugInfo(prev => prev + '\nScanned data: ' + scannedData);
-              
-              // Stop scanning and process the result
-              codeReader.reset();
-              setScanning(false);
-              await processTicket(scannedData);
+              setDebugInfo('Barcode found: ' + result.getText());
+              processTicket(result.getText());
             }
-            
-            // Only log non-NotFound errors (NotFound is expected when no barcode is in view)
-            if (error && !(error instanceof NotFoundException)) {
-              setDebugInfo(prev => prev + '\nScanner error: ' + error.message);
+            if (err && scanning) {
+              if (Math.random() < 0.1) {
+                setDebugInfo(prev => prev + '\nScanning...');
+              }
             }
           }
         );
-
-        setDebugInfo(prev => prev + '\nScanner initialized successfully');
       } catch (error) {
-        console.error('Scanner initialization error:', error);
-        setDebugInfo(prev => prev + '\nError: ' + error.message);
-        
-        if (error.name === 'NotAllowedError') {
-          setError('Camera permission denied. Please allow camera access and try again.');
-        } else if (error.name === 'NotFoundError') {
-          setError('No camera found. Please ensure your device has a camera and try again.');
-        } else {
-          setError('Failed to start camera. Please try again.');
-        }
-
-        setScanning(false);
+        console.error('Error starting scanner:', error);
+        setDebugInfo('Error starting scanner: ' + error.message);
+        setError('Error starting scanner');
       }
     };
 
     initializeScanner();
 
-    // Cleanup function
     return () => {
       if (readerRef.current) {
         readerRef.current.reset();
       }
+      setScanning(false);
     };
-  }, [scanning]);
-
-  const processTicket = async (encryptedData: string) => {
-    if (!user) {
-      setDebugInfo('No user logged in');
-      return;
-    }
-    
-    try {
-      setDebugInfo('Processing scanned data: ' + encryptedData);
-      
-      // Validate and decrypt the ticket data
-      const ticketData = validateTicketData(encryptedData);
-      setDebugInfo(prev => prev + '\nDecrypted ticket data: ' + JSON.stringify(ticketData));
-
-      if (!ticketData) {
-        setDebugInfo(prev => prev + '\nInvalid ticket data');
-        toast.error('Invalid ticket data');
-        return;
-      }
-
-      // Get ticket from database
-      const { data: ticket, error: fetchError } = await supabase
-        .from('event_tickets')
-        .select('*, events(*)')
-        .eq('id', ticketData.ticketId)
-        .eq('ticket_number', ticketData.ticketNumber)
-        .single();
-
-      setDebugInfo(prev => prev + '\nFetch result: ' + JSON.stringify({ ticket, error: fetchError }));
-
-      if (fetchError || !ticket) {
-        setDebugInfo(prev => prev + '\nTicket not found');
-        toast.error('Ticket not found');
-        return;
-      }
-
-      // Verify user permissions
-      const { data: userProfile, error: userError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userProfile) {
-        setDebugInfo(prev => prev + '\nFailed to verify permissions');
-        toast.error('Failed to verify user permissions');
-        return;
-      }
-
-      if (!['admin', 'club_admin'].includes(userProfile.role)) {
-        setDebugInfo(prev => prev + '\nInsufficient permissions');
-        toast.error('Insufficient permissions to validate tickets');
-        return;
-      }
-
-      if (ticket.used_at) {
-        setDebugInfo(prev => prev + '\nTicket already used');
-        toast.error('Ticket has already been used');
-        return;
-      }
-
-      // Update ticket status
-      const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({
-          used_at: new Date().toISOString(),
-          validated_by: user.id,
-          status: 'used'
-        })
-        .eq('id', ticket.id);
-
-      if (updateError) {
-        setDebugInfo(prev => prev + '\nValidation failed: ' + updateError.message);
-        toast.error('Failed to validate ticket');
-        return;
-      }
-
-      setDebugInfo(prev => prev + '\nTicket validated successfully!');
-      toast.success('Ticket validated successfully!');
-      onClose();
-    } catch (error) {
-      console.error('Error processing ticket:', error);
-      setDebugInfo(prev => prev + '\nError: ' + error.message);
-      toast.error('Failed to process ticket');
-    }
-  };
+  }, []);
 
   const verifyTicketByNumber = async (ticketNumber: string) => {
-    if (!user) {
-      setDebugInfo('No user logged in');
-      return;
-    }
+    if (!user) return;
 
     try {
       setDebugInfo('Verifying ticket number: ' + ticketNumber);
@@ -218,8 +83,6 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .eq('ticket_number', ticketNumber)
         .single();
 
-      setDebugInfo(prev => prev + '\nFetch result: ' + JSON.stringify({ ticket, error: fetchError }));
-
       if (fetchError || !ticket) {
         setDebugInfo(prev => prev + '\nTicket not found');
         toast.error('Ticket not found');
@@ -232,8 +95,6 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .select('role')
         .eq('id', user.id)
         .single();
-
-      setDebugInfo(prev => prev + '\nUser profile: ' + JSON.stringify(userProfile));
 
       if (userError || !userProfile) {
         setDebugInfo(prev => prev + '\nFailed to verify permissions');
@@ -263,10 +124,8 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         })
         .eq('id', ticket.id);
 
-      setDebugInfo(prev => prev + '\nUpdate result: ' + JSON.stringify({ error: updateError }));
-
       if (updateError) {
-        setDebugInfo(prev => prev + '\nValidation failed: ' + updateError.message);
+        setDebugInfo(prev => prev + '\nValidation failed');
         toast.error('Failed to validate ticket');
         return;
       }
@@ -278,6 +137,85 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       console.error('Error verifying ticket:', error);
       setDebugInfo(prev => prev + '\nError: ' + error.message);
       toast.error('Failed to verify ticket');
+    }
+  };
+
+  const processTicket = async (scannedData: string) => {
+    if (!user) return;
+    
+    try {
+      setDebugInfo('Processing scanned data: ' + scannedData);
+      
+      // Try to decrypt the scanned data
+      const ticketData = validateTicketData(scannedData);
+      if (!ticketData) {
+        setDebugInfo(prev => prev + '\nInvalid ticket data');
+        toast.error('Invalid ticket data');
+        return;
+      }
+
+      // Get ticket from database using ticket ID and number
+      const { data: ticket, error: fetchError } = await supabase
+        .from('event_tickets')
+        .select('*, events(*)')
+        .eq('id', ticketData.ticketId)
+        .eq('ticket_number', ticketData.ticketNumber)
+        .single();
+
+      if (fetchError || !ticket) {
+        setDebugInfo(prev => prev + '\nTicket not found');
+        toast.error('Ticket not found');
+        return;
+      }
+
+      // Verify user permissions
+      const { data: userProfile, error: userError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (userError || !userProfile) {
+        setDebugInfo(prev => prev + '\nFailed to verify permissions');
+        toast.error('Failed to verify user permissions');
+        return;
+      }
+
+      if (!['admin', 'club_admin'].includes(userProfile.role)) {
+        setDebugInfo(prev => prev + '\nInsufficient permissions');
+        toast.error('Insufficient permissions to validate tickets');
+        return;
+      }
+
+      if (ticket.used_at) {
+        setDebugInfo(prev => prev + '\nTicket already used');
+        toast.error('Ticket has already been used');
+        return;
+      }
+
+      // Update ticket status
+      const { error: updateError } = await supabase
+        .from('event_tickets')
+        .update({
+          used_at: new Date().toISOString(),
+          validated_by: user.id,
+          status: 'used'
+        })
+        .eq('id', ticket.id);
+
+      if (updateError) {
+        setDebugInfo(prev => prev + '\nValidation failed');
+        toast.error('Failed to validate ticket');
+        return;
+      }
+
+      setDebugInfo(prev => prev + '\nTicket validated successfully!');
+      toast.success('Ticket validated successfully!');
+      onClose();
+    } catch (error) {
+      console.error('Error processing ticket:', error);
+      setDebugInfo(prev => prev + '\nError: ' + error.message);
+      toast.error('Failed to process ticket');
     }
   };
 
@@ -336,6 +274,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               onClick={() => {
                 setError(null);
                 setScanning(true);
+                initializeScanner();
               }}
               className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 w-full"
             >
@@ -366,6 +305,4 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       </div>
     </div>
   );
-};
-
-export default BarcodeScanner;
+}

@@ -13,9 +13,9 @@ export interface TicketData {
 }
 
 export const generateTicketNumber = () => {
-  const timestamp = Date.now();
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-  return `TKT-${timestamp}-${random}`;
+  // Generate a random 8-digit number
+  const randomNum = Math.floor(10000000 + Math.random() * 90000000);
+  return `TKT${randomNum}`;
 };
 
 export const encryptTicketData = (data: TicketData): string => {

@@ -76,6 +76,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     try {
       setDebugInfo('Verifying ticket number: ' + ticketNumber);
 
+      // Get ticket by ticket number
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
         .select('*, events(*)')
@@ -88,6 +89,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         return;
       }
 
+      // Verify user permissions
       const { data: userProfile, error: userError } = await supabase
         .from('profiles')
         .select('role')
@@ -112,11 +114,13 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         return;
       }
 
+      // Update ticket status
       const { error: updateError } = await supabase
         .from('event_tickets')
         .update({
           used_at: new Date().toISOString(),
-          validated_by: user.id
+          validated_by: user.id,
+          status: 'used'
         })
         .eq('id', ticket.id);
 
@@ -136,93 +140,26 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     }
   };
 
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (manualInput.trim()) {
-      verifyTicketByNumber(manualInput.trim());
-    }
-  };
-
-  const processTicket = async (encryptedData: string) => {
+  const processTicket = async (scannedData: string) => {
     if (!user) return;
-
+    
     try {
-      setDebugInfo(prev => prev + '\nProcessing ticket...');
+      setDebugInfo('Processing scanned data: ' + scannedData);
       
-      const ticketData = validateTicketData(encryptedData);
-      if (!ticketData) {
-        setDebugInfo(prev => prev + '\nInvalid ticket data');
-        toast.error('Invalid ticket data');
-        return;
-      }
-
-      setDebugInfo(prev => prev + '\nTicket data validated');
-
-      const { data: userProfile, error: userError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userProfile) {
-        setDebugInfo(prev => prev + '\nFailed to verify permissions');
-        toast.error('Failed to verify user permissions');
-        return;
-      }
-
-      if (!['admin', 'club_admin'].includes(userProfile.role)) {
-        setDebugInfo(prev => prev + '\nInsufficient permissions');
-        toast.error('Insufficient permissions to validate tickets');
-        return;
-      }
-
-      setDebugInfo(prev => prev + '\nFetching ticket details...');
-      const { data: ticket, error: fetchError } = await supabase
-        .from('event_tickets')
-        .select('*')
-        .eq('id', ticketData.ticketId)
-        .single();
-
-      if (fetchError || !ticket) {
-        setDebugInfo(prev => prev + '\nTicket not found');
-        toast.error('Ticket not found');
-        return;
-      }
-
-      if (ticket.user_id !== ticketData.userId || ticket.event_id !== ticketData.eventId) {
-        setDebugInfo(prev => prev + '\nTicket data mismatch');
-        toast.error('Invalid ticket data');
-        return;
-      }
-
-      if (ticket.used_at) {
-        setDebugInfo(prev => prev + '\nTicket already used');
-        toast.error('Ticket has already been used');
-        return;
-      }
-
-      setDebugInfo(prev => prev + '\nValidating ticket...');
-      const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({
-          used_at: new Date().toISOString(),
-          validated_by: user.id
-        })
-        .eq('id', ticketData.ticketId);
-
-      if (updateError) {
-        setDebugInfo(prev => prev + '\nValidation failed');
-        toast.error('Failed to validate ticket');
-        return;
-      }
-
-      setDebugInfo(prev => prev + '\nTicket validated successfully!');
-      toast.success('Ticket validated successfully!');
-      onClose();
+      // Try to verify the scanned data as a ticket number directly
+      await verifyTicketByNumber(scannedData);
+      
     } catch (error) {
       console.error('Error processing ticket:', error);
       setDebugInfo(prev => prev + '\nError: ' + error.message);
       toast.error('Failed to process ticket');
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (manualInput.trim()) {
+      verifyTicketByNumber(manualInput.trim());
     }
   };
 
@@ -280,7 +217,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
             </button>
           </div>
         ) : (
-          <div className="relative aspect-[16/9] w-full bg-black rounded-lg overflow-hidden">
+          <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden">
             <video
               ref={videoRef}
               className="absolute inset-0 w-full h-full object-cover"
@@ -288,7 +225,7 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               muted
             />
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-full h-16 border-2 border-purple-500 bg-purple-500 bg-opacity-10">
+              <div className="w-full h-24 border-2 border-purple-500 bg-purple-500 bg-opacity-10">
                 <div className="w-full h-full border-l-2 border-r-2 border-purple-500 animate-pulse" />
               </div>
             </div>

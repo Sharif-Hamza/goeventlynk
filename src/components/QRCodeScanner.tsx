@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Html5Qrcode, Html5QrcodeError } from 'html5-qrcode';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../context/AuthContext';
 
 interface QRCodeScannerProps {
   onClose: () => void;

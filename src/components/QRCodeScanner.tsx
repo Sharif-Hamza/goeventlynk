@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Html5Qrcode, Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import { validateTicketData } from '../utils/ticketUtils';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
+import { useAuth } from '../contexts/AuthContext';
 
 interface QRCodeScannerProps {
   onClose: () => void;
@@ -10,32 +11,71 @@ interface QRCodeScannerProps {
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null);
+  const { user } = useAuth();
 
   const onScanSuccess = useCallback(async (decodedText: string) => {
-    if (!scanner) return;
+    if (!scanner || !user) return;
     
     try {
       // Stop scanning immediately after successful scan
       await scanner.pause();
+
+      let ticketId = decodedText;
       
-      const ticketData = validateTicketData(decodedText);
-      if (!ticketData) {
-        toast.error('Invalid ticket QR code');
+      // Check if the scanned text is a JSON string (from QR code)
+      try {
+        const parsedData = JSON.parse(decodedText);
+        ticketId = parsedData.ticketId || parsedData.id || decodedText;
+      } catch (e) {
+        // If parsing fails, assume the scanned text is the ticket ID directly
+      }
+
+      // First check if the user has permission to validate tickets
+      const { data: userProfile, error: userError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (userError || !userProfile) {
+        toast.error('Failed to verify user permissions');
         scanner.resume();
         return;
       }
 
-      // Fetch ticket from database
+      if (!['admin', 'club_admin'].includes(userProfile.role)) {
+        toast.error('You do not have permission to validate tickets');
+        scanner.resume();
+        return;
+      }
+
+      // Fetch ticket from database with event details
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
-        .select('*')
-        .eq('id', ticketData.ticketId)
+        .select('*, events(*)')
+        .eq('id', ticketId)
         .single();
 
       if (fetchError || !ticket) {
         toast.error('Ticket not found');
         scanner.resume();
         return;
+      }
+
+      // For club_admin, verify they have permission for this event
+      if (userProfile.role === 'club_admin') {
+        const { data: clubAdmin } = await supabase
+          .from('club_admins')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('club_id', ticket.events.club_id)
+          .single();
+
+        if (!clubAdmin) {
+          toast.error('You do not have permission to validate tickets for this event');
+          scanner.resume();
+          return;
+        }
       }
 
       if (ticket.used_at) {
@@ -47,8 +87,11 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       // Update ticket as used
       const { error: updateError } = await supabase
         .from('event_tickets')
-        .update({ used_at: new Date().toISOString() })
-        .eq('id', ticketData.ticketId);
+        .update({ 
+          used_at: new Date().toISOString(),
+          validated_by: user.id 
+        })
+        .eq('id', ticketId);
 
       if (updateError) {
         toast.error('Failed to validate ticket');
@@ -64,7 +107,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       toast.error('Failed to process ticket');
       scanner.resume();
     }
-  }, [scanner, onClose]);
+  }, [scanner, onClose, user]);
 
   const onScanFailure = useCallback((error: any) => {
     // Only log specific errors, not the common "No QR code found" error
@@ -106,6 +149,22 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       }
     };
   }, [onScanSuccess, onScanFailure]);
+
+  if (!user) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg p-6">
+          <p>Please log in to scan tickets.</p>
+          <button
+            onClick={onClose}
+            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

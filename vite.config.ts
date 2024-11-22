@@ -7,11 +7,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'EventLynk - CCNY Event Management',
+        name: 'EventLynk',
         short_name: 'EventLynk',
-        description: 'Your gateway to City College\'s vibrant event community',
-        theme_color: '#7E22CE',
+        description: 'Event Ticket Management System',
+        theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',
         scope: '/',
@@ -19,30 +20,19 @@ export default defineConfig({
         orientation: 'portrait',
         icons: [
           {
-            src: '/pwa-64x64.png',
-            sizes: '64x64',
-            type: 'image/png'
-          },
-          {
-            src: '/pwa-192x192.png',
+            src: 'pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '/pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
-          },
-          {
-            src: '/maskable-icon-512x512.png',
+            src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'maskable'
+            purpose: 'any maskable'
           }
         ]
       },
       workbox: {
-        cleanupOutdatedCaches: true,
         sourcemap: true,
         runtimeCaching: [
           {
@@ -52,16 +42,18 @@ export default defineConfig({
               cacheName: 'supabase-cache',
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 // 1 day
+                maxAgeSeconds: 60 * 60 * 24 // 24 hours
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
               }
             }
           }
         ]
-      },
-      devOptions: {
-        enabled: true,
-        type: 'module'
       }
     })
-  ]
+  ],
+  server: {
+    https: true
+  }
 });

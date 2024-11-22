@@ -3,14 +3,6 @@ import { supabase } from '../lib/supabase';
 
 const ENCRYPTION_KEY = import.meta.env.VITE_TICKET_ENCRYPTION_KEY || 'eventlynk-dev-key';
 
-interface TicketData {
-  ticketId: string;
-  eventId: string;
-  userId: string;
-  ticketNumber: string;
-  timestamp: number;
-}
-
 // Function to get user's tickets with all details
 export const getUserTickets = async (userId: string) => {
   try {
@@ -49,19 +41,15 @@ export const createEventTicket = async (
   paymentId?: string
 ) => {
   try {
-    const ticketId = crypto.randomUUID();
+    // Generate ticket data
     const ticketNumber = generateTicketNumber();
-    
-    // Create ticket data for the barcode
-    const ticketData: TicketData = {
-      ticketId,
+    const ticketData = {
+      ticketId: crypto.randomUUID(),
       eventId,
       userId,
       ticketNumber,
       timestamp: Date.now(),
     };
-
-    // Encrypt the ticket data for the barcode
     const qrCodeData = generateQRCodeData(ticketData);
 
     // Try to get existing ticket
@@ -76,22 +64,20 @@ export const createEventTicket = async (
       throw existingError;
     }
 
-    // Prepare ticket data for database
+    // Prepare ticket data
     const ticketToUpsert = {
-      id: ticketId,
       user_id: userId,
       event_id: eventId,
-      ticket_number: ticketNumber,
       qr_code_data: qrCodeData,
-      ticket_data: ticketData, // Store raw ticket data for validation
+      ticket_number: ticketNumber,
       payment_status: paymentStatus,
       payment_id: paymentId,
       status: 'valid'
     };
 
-    // If ticket exists, use its ID
+    // If ticket exists, include its ID
     if (existingTickets?.[0]) {
-      ticketToUpsert.id = existingTickets[0].id;
+      ticketToUpsert['id'] = existingTickets[0].id;
     }
 
     // Create or update ticket
@@ -106,7 +92,7 @@ export const createEventTicket = async (
       throw ticketError || new Error('Failed to manage ticket');
     }
 
-    // Get ticket with event details
+    // Get ticket with details
     const { data: ticketWithDetails, error: detailsError } = await supabase
       .from('event_tickets')
       .select(`
@@ -141,12 +127,12 @@ export const generateTicketNumber = () => {
   return `TKT-${timestamp}-${random}`;
 };
 
-export const encryptTicketData = (data: TicketData): string => {
+export const encryptTicketData = (data: any): string => {
   const jsonString = JSON.stringify(data);
   return CryptoJS.AES.encrypt(jsonString, ENCRYPTION_KEY).toString();
 };
 
-export const decryptTicketData = (encryptedData: string): TicketData | null => {
+export const decryptTicketData = (encryptedData: string): any => {
   try {
     const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
     const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
@@ -157,14 +143,13 @@ export const decryptTicketData = (encryptedData: string): TicketData | null => {
   }
 };
 
-export const validateTicketData = (encryptedData: string): TicketData | null => {
+export const validateTicketData = (encryptedData: string): any => {
   try {
     const decrypted = decryptTicketData(encryptedData);
     if (!decrypted) return null;
 
-    // Verify all required fields are present
-    const requiredFields: (keyof TicketData)[] = ['ticketId', 'eventId', 'userId', 'ticketNumber', 'timestamp'];
-    const isValid = requiredFields.every(field => decrypted[field] !== undefined);
+    const requiredFields = ['ticketId', 'eventId', 'userId', 'ticketNumber', 'timestamp'];
+    const isValid = requiredFields.every(field => decrypted.hasOwnProperty(field));
     
     return isValid ? decrypted : null;
   } catch (error) {
@@ -173,7 +158,7 @@ export const validateTicketData = (encryptedData: string): TicketData | null => 
   }
 };
 
-export const generateQRCodeData = (ticketData: TicketData): string => {
+export const generateQRCodeData = (ticketData: any): string => {
   return encryptTicketData(ticketData);
 };
 

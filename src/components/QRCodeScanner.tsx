@@ -13,55 +13,27 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const { user } = useAuth();
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-  const [isSafari, setIsSafari] = useState(false);
-
-  useEffect(() => {
-    // Check if browser is Safari
-    const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    setIsSafari(isSafariBrowser);
-  }, []);
 
   useEffect(() => {
     const initializeScanner = async () => {
       try {
         // Request camera permission first
-        const constraints = {
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        };
-
-        if (isSafari) {
-          // Safari specific constraints
-          constraints.video = {
-            ...constraints.video,
-            deviceId: undefined // Let Safari choose the best camera
-          };
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         stream.getTracks().forEach(track => track.stop()); // Stop the stream after permission check
         setHasPermission(true);
-
-        // Configure scanner based on browser
-        const config = {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          formatsToSupport: ['QR_CODE'],
-          showTorchButtonIfSupported: true,
-          showZoomSliderIfSupported: true,
-          defaultZoomValueIfSupported: 2,
-          videoConstraints: constraints.video
-        };
 
         // Initialize QR Scanner
         const qrScanner = new Html5QrcodeScanner(
           "qr-reader",
-          config,
-          /* verbose= */ false
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            showTorchButtonIfSupported: true,
+            showZoomSliderIfSupported: true,
+            defaultZoomValueIfSupported: 2,
+          },
+          false
         );
 
         // Start scanning
@@ -71,32 +43,15 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
             await processTicket(decodedText);
           },
           (errorMessage) => {
-            // Only log critical errors
-            if (!errorMessage.includes('NotFound')) {
-              console.error('QR Scan error:', errorMessage);
-            }
+            console.error('QR Scan error:', errorMessage);
           }
         );
 
         scannerRef.current = qrScanner;
       } catch (error) {
-        console.error('Camera initialization error:', error);
+        console.error('Camera permission error:', error);
         setHasPermission(false);
-        
-        // Provide more specific error messages
-        if (error instanceof DOMException) {
-          if (error.name === 'NotAllowedError') {
-            toast.error('Camera access denied. Please enable camera permissions in your browser settings.');
-          } else if (error.name === 'NotFoundError') {
-            toast.error('No camera found. Please ensure your device has a working camera.');
-          } else if (error.name === 'NotReadableError') {
-            toast.error('Camera is in use by another application. Please close other apps using the camera.');
-          } else {
-            toast.error('Failed to access camera. Please check your camera settings and try again.');
-          }
-        } else {
-          toast.error('An unexpected error occurred. Please try again.');
-        }
+        toast.error('Camera permission denied. Please enable camera access.');
       }
     };
 
@@ -106,14 +61,10 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
     return () => {
       if (scannerRef.current) {
-        try {
-          scannerRef.current.clear();
-        } catch (error) {
-          console.error('Error cleaning up scanner:', error);
-        }
+        scannerRef.current.clear();
       }
     };
-  }, [user, isSafari]);
+  }, [user]);
 
   const processTicket = async (encryptedData: string) => {
     if (!user) return;

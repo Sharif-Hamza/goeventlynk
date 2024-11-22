@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
@@ -11,8 +11,7 @@ interface QRCodeScannerProps {
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const { user } = useAuth();
-  const html5QrCode = useRef<Html5Qrcode | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   const processTicket = async (ticketId: string) => {
     if (!user) return;
@@ -102,15 +101,13 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       toast.success('Ticket validated successfully!');
       
       // Stop scanning and close
-      if (html5QrCode.current) {
-        await html5QrCode.current.stop();
+      if (scannerRef.current) {
+        scannerRef.current.clear();
       }
       onClose();
     } catch (error) {
       console.error('Error processing ticket:', error);
       toast.error('Failed to process ticket');
-    } finally {
-      setIsScanning(true); // Reset scanning state to allow new scans
     }
   };
 
@@ -120,34 +117,30 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         // Request camera permission
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { 
-            facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            facingMode: "environment"
           } 
         });
         stream.getTracks().forEach(track => track.stop());
         setHasPermission(true);
 
         // Initialize QR scanner
-        html5QrCode.current = new Html5Qrcode("reader");
-        setIsScanning(true);
+        scannerRef.current = new Html5QrcodeScanner(
+          "reader",
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            showTorchButtonIfSupported: true,
+            showZoomSliderIfSupported: true,
+            defaultZoomValueIfSupported: 2
+          },
+          false
+        );
 
-        const config = {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          formatsToSupport: ['QR_CODE']
-        };
-
-        await html5QrCode.current.start(
-          { facingMode: "environment" },
-          config,
+        scannerRef.current.render(
           async (decodedText) => {
-            if (isScanning) {
-              setIsScanning(false);
-              console.log('QR Code detected:', decodedText);
-              await processTicket(decodedText);
-            }
+            console.log('QR Code detected:', decodedText);
+            await processTicket(decodedText);
           },
           (errorMessage) => {
             // Ignore frequent errors to prevent console spam
@@ -166,8 +159,8 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     initializeScanner();
 
     return () => {
-      if (html5QrCode.current) {
-        html5QrCode.current.stop().catch(console.error);
+      if (scannerRef.current) {
+        scannerRef.current.clear();
       }
     };
   }, [user]);
@@ -196,8 +189,8 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
             <h2 className="text-xl font-semibold">Scan QR Code</h2>
             <button
               onClick={() => {
-                if (html5QrCode.current) {
-                  html5QrCode.current.stop().catch(console.error);
+                if (scannerRef.current) {
+                  scannerRef.current.clear();
                 }
                 onClose();
               }}
@@ -226,21 +219,12 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
           ) : (
             <div className="relative">
               <div 
-                id="reader" 
-                className="w-full rounded-lg overflow-hidden"
+                id="reader"
                 style={{ 
-                  maxHeight: '70vh',
-                  minHeight: '300px',
-                  backgroundColor: '#000000'
+                  width: '100%',
+                  minHeight: '300px'
                 }}
               />
-              <div className="absolute inset-0 border-2 border-blue-500 opacity-50 pointer-events-none">
-                <div className="absolute inset-0 border-4 border-blue-500 rounded-lg"></div>
-                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-500 rounded-tl"></div>
-                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-500 rounded-tr"></div>
-                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-500 rounded-bl"></div>
-                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-500 rounded-br"></div>
-              </div>
             </div>
           )}
           <p className="text-sm text-gray-600 mt-4 text-center">

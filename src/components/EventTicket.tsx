@@ -97,21 +97,22 @@ const EventTicket: React.FC<EventTicketProps> = ({
           </div>
 
           <div className="flex flex-col items-center justify-center p-4 bg-white rounded-lg shadow-md">
-            <div className="mb-2">Ticket #: {ticketNumber}</div>
+            <div className="mb-2 text-lg font-semibold">Ticket #: {ticketNumber}</div>
             <Barcode
               value={ticketNumber}
               format="CODE128"
               width={2}
               height={100}
-              displayValue={false}
+              displayValue={true}
+              textAlign="center"
+              textPosition="bottom"
+              textMargin={8}
+              fontSize={16}
               background="#ffffff"
               lineColor="#000000"
               margin={20}
               className="w-full max-w-[300px]"
             />
-            <p className="text-sm text-gray-500 text-center mt-2">
-              Scan to verify ticket
-            </p>
           </div>
         </div>
       </div>

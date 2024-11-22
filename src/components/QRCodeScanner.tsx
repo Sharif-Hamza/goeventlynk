@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { validateTicketData } from '../utils/ticketUtils';
 import { X } from 'lucide-react';
-import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/library';
+import { BrowserMultiFormatReader, BarcodeFormat, NotFoundException } from '@zxing/library';
 
 interface QRCodeScannerProps {
   onClose: () => void;
@@ -20,58 +20,75 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   const [manualInput, setManualInput] = useState<string>('');
 
   useEffect(() => {
-    const initializeScanner = async () => {
+    if (!scanning) return;
+
+    const codeReader = new BrowserMultiFormatReader();
+    readerRef.current = codeReader;
+
+    const startScanning = async () => {
       try {
-        readerRef.current = new BrowserMultiFormatReader();
-        readerRef.current.formats = [BarcodeFormat.CODE_128];
-        
-        setScanning(true);
         setDebugInfo('Starting scanner...');
+        const videoInputDevices = await codeReader.listVideoInputDevices();
         
-        if (!videoRef.current) return;
-        
-        await readerRef.current.decodeFromConstraints(
-          {
-            audio: false,
-            video: {
-              facingMode: 'environment',
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              aspectRatio: { ideal: 1.7777777778 }
-            }
-          },
-          videoRef.current,
-          (result, err) => {
+        // Prefer environment/back camera
+        const selectedDevice = videoInputDevices.find(device => 
+          device.label.toLowerCase().includes('back') || 
+          device.label.toLowerCase().includes('environment')
+        ) || videoInputDevices[0];
+
+        if (selectedDevice) {
+          setDebugInfo(prev => prev + '\nUsing camera: ' + selectedDevice.label);
+        }
+
+        const constraints = {
+          video: {
+            deviceId: selectedDevice?.deviceId,
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+
+        await codeReader.decodeFromConstraints(
+          constraints,
+          videoRef.current!,
+          async (result, error) => {
             if (result) {
-              setDebugInfo('Barcode found: ' + result.getText());
-              processTicket(result.getText());
-            }
-            if (err && scanning) {
-              if (Math.random() < 0.1) {
-                setDebugInfo(prev => prev + '\nScanning...');
+              setDebugInfo(prev => prev + '\nScanned value: ' + result.getText());
+              const scannedText = result.getText();
+              
+              if (scannedText) {
+                codeReader.reset();
+                setScanning(false);
+                await processTicket(scannedText);
               }
+            }
+            if (error && !(error instanceof NotFoundException)) {
+              setDebugInfo(prev => prev + '\nScanner error: ' + error.message);
             }
           }
         );
       } catch (error) {
         console.error('Error starting scanner:', error);
-        setDebugInfo('Error starting scanner: ' + error.message);
-        setError('Error starting scanner');
+        setDebugInfo(prev => prev + '\nScanner error: ' + error.message);
+        setError('Failed to start scanner. Please try again.');
       }
     };
 
-    initializeScanner();
+    startScanning();
 
     return () => {
       if (readerRef.current) {
         readerRef.current.reset();
       }
-      setScanning(false);
     };
-  }, []);
+  }, [scanning]);
 
   const verifyTicketByNumber = async (ticketNumber: string) => {
-    if (!user) return;
+    if (!user) {
+      setDebugInfo('No user logged in');
+      return;
+    }
 
     try {
       setDebugInfo('Verifying ticket number: ' + ticketNumber);
@@ -82,6 +99,8 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .select('*, events(*)')
         .eq('ticket_number', ticketNumber)
         .single();
+
+      setDebugInfo(prev => prev + '\nFetch result: ' + JSON.stringify({ ticket, error: fetchError }));
 
       if (fetchError || !ticket) {
         setDebugInfo(prev => prev + '\nTicket not found');
@@ -95,6 +114,8 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .select('role')
         .eq('id', user.id)
         .single();
+
+      setDebugInfo(prev => prev + '\nUser profile: ' + JSON.stringify(userProfile));
 
       if (userError || !userProfile) {
         setDebugInfo(prev => prev + '\nFailed to verify permissions');
@@ -124,8 +145,10 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         })
         .eq('id', ticket.id);
 
+      setDebugInfo(prev => prev + '\nUpdate result: ' + JSON.stringify({ error: updateError }));
+
       if (updateError) {
-        setDebugInfo(prev => prev + '\nValidation failed');
+        setDebugInfo(prev => prev + '\nValidation failed: ' + updateError.message);
         toast.error('Failed to validate ticket');
         return;
       }
@@ -141,13 +164,20 @@ const BarcodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   };
 
   const processTicket = async (scannedData: string) => {
-    if (!user) return;
+    if (!user) {
+      setDebugInfo('No user logged in');
+      return;
+    }
     
     try {
       setDebugInfo('Processing scanned data: ' + scannedData);
       
+      // Clean up scanned data
+      const cleanTicketNumber = scannedData.trim();
+      setDebugInfo(prev => prev + '\nCleaned ticket number: ' + cleanTicketNumber);
+      
       // Try to verify the scanned data as a ticket number directly
-      await verifyTicketByNumber(scannedData);
+      await verifyTicketByNumber(cleanTicketNumber);
       
     } catch (error) {
       console.error('Error processing ticket:', error);

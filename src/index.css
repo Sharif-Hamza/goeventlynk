@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  html {
+    height: -webkit-fill-available;
+  }
+
+  body {
+    @apply bg-gray-50 font-sans antialiased min-h-screen;
+    height: 100%;
+    min-height: -webkit-fill-available;
+    overscroll-behavior-y: none;
+    -webkit-overflow-scrolling: touch;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  #root {
+    @apply flex flex-col min-h-screen;
+  }
+
+  main {
+    @apply flex-1;
+  }
+
+  /* iOS PWA specific styles */
+  @supports (-webkit-touch-callout: none) {
+    .min-h-screen {
+      min-height: -webkit-fill-available;
+    }
+
+    .fixed-ios {
+      position: fixed;
+      width: 100%;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    /* Enable smooth scrolling */
+    .scroll-container {
+      @apply h-full overflow-y-auto;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-xl font-medium transition-all duration-200 transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .btn-primary {
+    @apply bg-purple-700 text-white hover:bg-purple-800 shadow-lg shadow-purple-700/30;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-purple-700 border-2 border-purple-700 hover:bg-purple-50;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200;
+    -webkit-appearance: none;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-xl shadow-gray-200/50 hover:shadow-2xl hover:shadow-gray-200/50 transition-all duration-300;
+  }
+
+  .nav-link {
+    @apply px-4 py-2 rounded-xl transition-colors hover:bg-purple-800/10 text-white/90 hover:text-white;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nav-link-active {
+    @apply bg-purple-800/20 text-white;
+  }
+
+  /* Mobile optimizations */
+  @media (max-width: 768px) {
+    .btn, .input, .nav-link {
+      @apply text-base py-3;
+    }
+
+    .card {
+      @apply rounded-xl;
+    }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-purple-300 rounded-full hover:bg-purple-400;
+}

@@ -4,7 +4,8 @@
   "description": "Event Ticket Management System",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "orientation": "portrait",
+  "background_color": "#000000",
   "theme_color": "#000000",
   "icons": [
     {
@@ -24,16 +25,12 @@
       "purpose": "maskable"
     }
   ],
-  "permissions": [
-    "camera"
-  ],
-  "orientation": "portrait",
-  "scope": "/",
-  "categories": ["events", "tickets", "management"],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "permissions": ["camera"],
   "features": [
     "Cross Platform",
-    "fast",
-    "simple"
-  ],
-  "prefer_related_applications": false
+    "Camera Access",
+    "QR Code Scanning"
+  ]
 }

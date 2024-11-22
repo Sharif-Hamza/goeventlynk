@@ -18,12 +18,15 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     if (!user) return;
 
     try {
+      console.log('Processing ticket:', ticketId);
+      
       // Try to parse JSON if the QR code contains JSON data
       try {
         const parsedData = JSON.parse(ticketId);
         ticketId = parsedData.ticketId || parsedData.id || ticketId;
       } catch (e) {
         // If parsing fails, use the raw text
+        console.log('Using raw text as ticketId:', ticketId);
       }
 
       // Check user permissions
@@ -35,6 +38,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
 
       if (userError || !userProfile) {
         toast.error('Failed to verify user permissions');
+        console.error('User profile error:', userError);
         return;
       }
 
@@ -44,6 +48,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       }
 
       // Fetch ticket details
+      console.log('Fetching ticket with ID:', ticketId);
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
         .select('*, events(*)')
@@ -51,9 +56,12 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .single();
 
       if (fetchError || !ticket) {
+        console.error('Ticket fetch error:', fetchError);
         toast.error('Ticket not found');
         return;
       }
+
+      console.log('Found ticket:', ticket);
 
       // Check club admin permissions
       if (userProfile.role === 'club_admin') {
@@ -76,6 +84,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
       }
 
       // Update ticket
+      console.log('Updating ticket status...');
       const { error: updateError } = await supabase
         .from('event_tickets')
         .update({
@@ -85,15 +94,23 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         .eq('id', ticketId);
 
       if (updateError) {
+        console.error('Ticket update error:', updateError);
         toast.error('Failed to validate ticket');
         return;
       }
 
       toast.success('Ticket validated successfully!');
+      
+      // Stop scanning and close
+      if (html5QrCode.current) {
+        await html5QrCode.current.stop();
+      }
       onClose();
     } catch (error) {
       console.error('Error processing ticket:', error);
       toast.error('Failed to process ticket');
+    } finally {
+      setIsScanning(true); // Reset scanning state to allow new scans
     }
   };
 
@@ -101,7 +118,13 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
     const initializeScanner = async () => {
       try {
         // Request camera permission
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
         stream.getTracks().forEach(track => track.stop());
         setHasPermission(true);
 
@@ -112,7 +135,8 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
         const config = {
           fps: 10,
           qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0
+          aspectRatio: 1.0,
+          formatsToSupport: ['QR_CODE']
         };
 
         await html5QrCode.current.start(
@@ -121,10 +145,16 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
           async (decodedText) => {
             if (isScanning) {
               setIsScanning(false);
+              console.log('QR Code detected:', decodedText);
               await processTicket(decodedText);
             }
           },
-          () => {}  // Ignore errors to prevent console spam
+          (errorMessage) => {
+            // Ignore frequent errors to prevent console spam
+            if (errorMessage.includes('NotFoundError')) {
+              console.log('No QR code found');
+            }
+          }
         );
       } catch (error) {
         console.error('Scanner initialization error:', error);
@@ -200,6 +230,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
                 className="w-full rounded-lg overflow-hidden"
                 style={{ 
                   maxHeight: '70vh',
+                  minHeight: '300px',
                   backgroundColor: '#000000'
                 }}
               />
@@ -212,6 +243,9 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
               </div>
             </div>
           )}
+          <p className="text-sm text-gray-600 mt-4 text-center">
+            Position the QR code within the frame to scan
+          </p>
         </div>
       </div>
     </div>

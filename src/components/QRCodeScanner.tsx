@@ -126,56 +126,53 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
   useEffect(() => {
     const initializeScanner = async () => {
       try {
-        // Request camera permission
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: "environment"
-          } 
-        });
-        stream.getTracks().forEach(track => track.stop());
+        // Request camera permission first
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(track => track.stop()); // Stop the stream after permission check
         setHasPermission(true);
 
-        // Initialize QR scanner
-        scannerRef.current = new Html5QrcodeScanner(
-          "reader",
+        // Initialize QR Scanner with better configuration
+        const qrScanner = new Html5QrcodeScanner(
+          "qr-reader",
           {
             fps: 10,
             qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0,
             showTorchButtonIfSupported: true,
             showZoomSliderIfSupported: true,
-            defaultZoomValueIfSupported: 2
+            defaultZoomValueIfSupported: 2,
           },
           false
         );
 
-        scannerRef.current.render(
+        // Start scanning
+        qrScanner.render(
           async (decodedText) => {
             console.log('QR Code detected:', decodedText);
             await processTicket(decodedText);
           },
           (errorMessage) => {
-            // Ignore frequent errors to prevent console spam
-            if (errorMessage.includes('NotFoundError')) {
-              console.log('No QR code found');
-            }
+            console.error('QR Scan error:', errorMessage);
           }
         );
+
+        scannerRef.current = qrScanner;
       } catch (error) {
-        console.error('Scanner initialization error:', error);
+        console.error('Camera permission error:', error);
         setHasPermission(false);
-        toast.error('Failed to access camera. Please check permissions and try again.');
+        toast.error('Camera permission denied. Please enable camera access.');
       }
     };
 
     initializeScanner();
 
+    // Cleanup function
     return () => {
       if (scannerRef.current) {
         scannerRef.current.clear();
       }
     };
-  }, [user]);
+  }, []);
 
   if (!user) {
     return (
@@ -231,7 +228,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose }) => {
           ) : (
             <div className="relative">
               <div 
-                id="reader"
+                id="qr-reader"
                 style={{ 
                   width: '100%',
                   minHeight: '300px'

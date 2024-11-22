@@ -72,7 +72,8 @@ export const createEventTicket = async (
       ticket_number: ticketNumber,
       payment_status: paymentStatus,
       payment_id: paymentId,
-      status: 'valid'
+      status: 'valid',
+      ticket_data: ticketData // Store the raw ticket data for validation
     };
 
     // If ticket exists, include its ID
@@ -167,14 +168,56 @@ export const generateQRCodeData = (ticketData: any): string => {
 };
 
 export const validateTicket = async (ticketId: string, validatedBy: string) => {
-  return await supabase
-    .from('event_tickets')
-    .update({
-      status: 'used',
-      used_at: new Date().toISOString(),
-      validated_by: validatedBy
-    })
-    .eq('id', ticketId);
+  try {
+    // First get the ticket to check its current status
+    const { data: ticket, error: fetchError } = await supabase
+      .from('event_tickets')
+      .select('*')
+      .eq('id', ticketId)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching ticket:', fetchError);
+      throw fetchError;
+    }
+
+    if (!ticket) {
+      throw new Error('Ticket not found');
+    }
+
+    if (ticket.status === 'used') {
+      throw new Error('Ticket has already been used');
+    }
+
+    // Update the ticket status
+    const { data: updatedTicket, error: updateError } = await supabase
+      .from('event_tickets')
+      .update({
+        status: 'used',
+        used_at: new Date().toISOString(),
+        validated_by: validatedBy
+      })
+      .eq('id', ticketId)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Error updating ticket:', updateError);
+      throw updateError;
+    }
+
+    return {
+      success: true,
+      ticket: updatedTicket,
+      message: 'Ticket validated successfully'
+    };
+  } catch (error) {
+    console.error('Error in validateTicket:', error);
+    return {
+      success: false,
+      message: error.message || 'Failed to validate ticket'
+    };
+  }
 };
 
 export const getTicketByNumber = async (ticketNumber: string) => {

@@ -57,16 +57,17 @@ const EventTicket: React.FC<EventTicketProps> = ({ ticket }) => {
           <Barcode
             value={ticket.qr_code_data || ticket.ticket_number}
             format="CODE128"
-            width={2}
-            height={100}
-            displayValue={false}
+            width={1.5}
+            height={150}
+            displayValue={true}
+            fontSize={16}
             background="#ffffff"
             lineColor="#000000"
-            margin={20}
-            className="w-full max-w-[300px]"
+            margin={10}
+            className="w-full max-w-[400px]"
           />
           <p className="text-sm text-gray-500 text-center mt-2">
-            Scan to verify ticket
+            {ticket.status === 'used' ? 'Ticket has been used' : 'Scan to verify ticket'}
           </p>
         </div>
       </div>

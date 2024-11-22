@@ -27,6 +27,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "html2canvas": "^1.4.1",
+    "html5-qrcode": "^2.3.8",
     "jspdf": "^2.5.1",
     "lucide-react": "^0.344.0",
     "qrcode.react": "^3.1.0",

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { validateTicketData, decryptTicketData } from '../utils/ticketUtils';
+import { validateTicketData, decryptTicketData, validateTicket } from '../utils/ticketUtils';
 import { X } from 'lucide-react';
 import { BrowserMultiFormatReader, BarcodeFormat } from '@zxing/library';
 
@@ -73,6 +73,8 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
   }, []);
 
   const handleTicketValidation = async (ticketData: string) => {
+    if (!user) return;
+
     try {
       setDebugInfo(`Validating ticket data: ${ticketData}`);
       const decryptedData = decryptTicketData(ticketData);
@@ -83,7 +85,7 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
 
       const { ticketId, eventId, userId, ticketNumber, timestamp } = decryptedData;
 
-      // Check if ticket exists and is valid
+      // Verify ticket exists and matches decrypted data
       const { data: ticketRecord, error: ticketError } = await supabase
         .from('event_tickets')
         .select('*')
@@ -94,32 +96,26 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
         .single();
 
       if (ticketError || !ticketRecord) {
-        throw new Error('Ticket not found');
+        throw new Error('Ticket not found or invalid');
       }
 
-      if (ticketRecord.status === 'used') {
-        throw new Error('Ticket has already been used');
-      }
-
-      // Update ticket status to used
-      const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({ 
-          status: 'used',
-          used_at: new Date().toISOString()
-        })
-        .eq('id', ticketId);
-
-      if (updateError) {
-        throw new Error('Failed to update ticket status');
+      // Validate ticket using the common validation function
+      const result = await validateTicket(ticketId, user.id);
+      
+      if (!result.success) {
+        throw new Error(result.message);
       }
 
       setSuccess('Ticket validated successfully!');
       setError(null);
+      toast.success('Ticket validated successfully!');
+      onClose();
       
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to validate ticket');
+      const message = error instanceof Error ? error.message : 'Failed to validate ticket';
+      setError(message);
       setSuccess(null);
+      toast.error(message);
     }
   };
 
@@ -132,64 +128,31 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
       // Get ticket by ticket number
       const { data: ticket, error: fetchError } = await supabase
         .from('event_tickets')
-        .select('*, events(*)')
+        .select('*')
         .eq('ticket_number', ticketNumber)
         .single();
 
       if (fetchError || !ticket) {
         setDebugInfo(prev => prev + '\nTicket not found');
-        toast.error('Ticket not found');
-        return;
+        throw new Error('Ticket not found');
       }
 
-      // Verify user permissions
-      const { data: userProfile, error: userError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userProfile) {
-        setDebugInfo(prev => prev + '\nFailed to verify permissions');
-        toast.error('Failed to verify user permissions');
-        return;
-      }
-
-      if (!['admin', 'club_admin'].includes(userProfile.role)) {
-        setDebugInfo(prev => prev + '\nInsufficient permissions');
-        toast.error('Insufficient permissions to validate tickets');
-        return;
-      }
-
-      if (ticket.used_at) {
-        setDebugInfo(prev => prev + '\nTicket already used');
-        toast.error('Ticket has already been used');
-        return;
-      }
-
-      // Update ticket status
-      const { error: updateError } = await supabase
-        .from('event_tickets')
-        .update({
-          used_at: new Date().toISOString(),
-          validated_by: user.id,
-          status: 'used'
-        })
-        .eq('id', ticket.id);
-
-      if (updateError) {
-        setDebugInfo(prev => prev + '\nValidation failed');
-        toast.error('Failed to validate ticket');
-        return;
+      // Validate ticket using the common validation function
+      const result = await validateTicket(ticket.id, user.id);
+      
+      if (!result.success) {
+        throw new Error(result.message);
       }
 
       setDebugInfo(prev => prev + '\nTicket validated successfully!');
       toast.success('Ticket validated successfully!');
       onClose();
+
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to validate ticket';
       console.error('Error verifying ticket:', error);
-      setDebugInfo(prev => prev + '\nError: ' + error.message);
-      toast.error('Failed to verify ticket');
+      setDebugInfo(prev => prev + '\nError: ' + message);
+      toast.error(message);
     }
   };
 

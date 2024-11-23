@@ -147,17 +147,28 @@ export default function Dashboard() {
       if (status === 'approved' && registration) {
         try {
           const paymentStatus = registration.events.price > 0 ? 'pending' : 'not_required';
-          await createEventTicket(
+          const ticket = await createEventTicket(
             registration.user_id,
             registration.event_id,
             paymentStatus
           );
+          
+          if (!ticket) {
+            throw new Error('Failed to create ticket');
+          }
+          
           toast.success('Ticket created successfully');
+          
+          // Immediately invalidate ticket-related queries
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['user-tickets'] }),
+            queryClient.invalidateQueries({ queryKey: ['event-tickets'] })
+          ]);
         } catch (ticketError: any) {
-          console.error('Error with ticket:', ticketError);
+          console.error('Error creating ticket:', ticketError);
           // If it's not a duplicate error, show the error
           if (ticketError?.code !== '23505') {
-            toast.error('Failed to manage ticket');
+            toast.error('Failed to create ticket');
             return;
           }
         }
@@ -171,6 +182,7 @@ export default function Dashboard() {
         queryClient.invalidateQueries({ queryKey: ['admin-events'] }),
         queryClient.invalidateQueries({ queryKey: ['events'] }),
         queryClient.invalidateQueries({ queryKey: ['event-registrations'] }),
+        queryClient.invalidateQueries({ queryKey: ['user-tickets'] }),
         queryClient.invalidateQueries({ queryKey: ['event-tickets'] })
       ]);
       

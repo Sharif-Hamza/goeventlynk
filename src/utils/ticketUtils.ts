@@ -164,15 +164,37 @@ export const generateQRCodeData = (ticketData: any): string => {
 
 export const validateTicket = async (ticketId: string, validatedBy: string) => {
   try {
-    // Get current ticket status
+    // Get current ticket status and check permissions
+    const { data: userProfile, error: userError } = await supabase
+      .from('profiles')
+      .select('role, club_id, is_admin')
+      .eq('id', validatedBy)
+      .single();
+
+    if (userError || !userProfile) {
+      throw new Error('Failed to verify user permissions');
+    }
+
+    if (!userProfile.is_admin && userProfile.role !== 'club_admin') {
+      throw new Error('Insufficient permissions to validate tickets');
+    }
+
+    // Get ticket with event details
     const { data: ticket, error: fetchError } = await supabase
       .from('event_tickets')
-      .select('*')
+      .select('*, events!inner(*)')
       .eq('id', ticketId)
       .single();
 
     if (fetchError || !ticket) {
       throw new Error(fetchError?.message || 'Ticket not found');
+    }
+
+    // For club admins, verify they can validate this event's tickets
+    if (!userProfile.is_admin && userProfile.role === 'club_admin') {
+      if (userProfile.club_id !== ticket.events.club_id) {
+        throw new Error('You can only validate tickets for your club\'s events');
+      }
     }
 
     if (ticket.status === 'used') {
@@ -212,8 +234,18 @@ export const getTicketByNumber = async (ticketNumber: string) => {
   return await supabase
     .from('event_tickets')
     .select(`
-      *,
-      event: events!event_tickets_event_id_fkey (
+      id,
+      user_id,
+      event_id,
+      ticket_number,
+      qr_code_data,
+      payment_status,
+      payment_id,
+      status,
+      created_at,
+      used_at,
+      validated_by,
+      events (
         id,
         title,
         date,

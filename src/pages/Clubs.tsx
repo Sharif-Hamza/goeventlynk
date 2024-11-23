@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadImage, getStorageUrl } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Building, Users, Bell, Calendar, Image, Trash2, Camera, Heart, ThumbsUp, Star } from 'lucide-react';
 import ClubPostModal from '../components/ClubPostModal';
@@ -196,29 +196,26 @@ export default function Clubs() {
       const fileExt = file.name.split('.').pop();
       const fileName = `${clubId}-${uuidv4()}.${fileExt}`;
 
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('club-banners')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: true
-        });
+      try {
+        // Upload image using the utility function
+        const publicUrl = await uploadImage(file, 'club-banners', fileName);
+        
+        if (!publicUrl) {
+          throw new Error('Failed to get banner URL');
+        }
 
-      if (uploadError) throw uploadError;
+        // Update club record with the new banner URL
+        const { error: updateError } = await supabase
+          .from('clubs')
+          .update({ banner_url: publicUrl })
+          .eq('id', clubId);
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('club-banners')
-        .getPublicUrl(fileName);
-
-      // Update club record
-      const { error: updateError } = await supabase
-        .from('clubs')
-        .update({ banner_url: publicUrl })
-        .eq('id', clubId);
-
-      if (updateError) throw updateError;
-      return publicUrl;
+        if (updateError) throw updateError;
+        return publicUrl;
+      } catch (error) {
+        console.error('Error updating banner:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clubs'] });
@@ -229,6 +226,14 @@ export default function Clubs() {
       toast.error('Failed to update club banner');
     },
   });
+
+  const handleBannerUpload = async (clubId: string, file: File) => {
+    try {
+      await updateBannerMutation.mutateAsync({ clubId, file });
+    } catch (error) {
+      console.error('Banner upload error:', error);
+    }
+  };
 
   // Delete post mutation
   const deletePostMutation = useMutation({
@@ -298,10 +303,6 @@ export default function Clubs() {
       toast.error('Failed to update reaction');
     },
   });
-
-  const handleBannerUpload = async (clubId: string, file: File) => {
-    updateBannerMutation.mutate({ clubId, file });
-  };
 
   const handleFollowToggle = (clubId: string) => {
     if (!user) return;
@@ -403,21 +404,20 @@ export default function Clubs() {
                   src={club.banner_url}
                   alt={`${club.name} banner`}
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = '/default-banner.svg';
+                    console.error('Error loading club banner:', club.banner_url);
+                  }}
+                  loading="lazy"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-purple-100">
-                  <Building className="w-16 h-16 text-purple-300" />
+                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                  <Building className="w-16 h-16 text-gray-400" />
                 </div>
               )}
               {isClubAdmin(club) && (
-                <>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
-                    title="Update banner"
-                  >
-                    <Camera className="w-5 h-5 text-gray-600" />
-                  </button>
+                <div className="absolute bottom-4 right-4">
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -430,7 +430,13 @@ export default function Clubs() {
                       }
                     }}
                   />
-                </>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-white p-2 rounded-full shadow-lg hover:bg-gray-50"
+                  >
+                    <Camera className="w-5 h-5 text-gray-700" />
+                  </button>
+                </div>
               )}
             </div>
 
@@ -522,11 +528,19 @@ export default function Clubs() {
                         </div>
                         <p className="text-gray-600 mb-2">{post.description}</p>
                         {post.image_url && (
-                          <img
-                            src={post.image_url}
-                            alt={post.title}
-                            className="max-w-full h-auto rounded-lg mb-2"
-                          />
+                          <div className="mt-4 rounded-lg overflow-hidden">
+                            <img
+                              src={post.image_url}
+                              alt={post.title}
+                              className="w-full h-auto object-cover rounded-lg"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.src = '/default-post.svg';
+                                console.error('Error loading post image:', post.image_url);
+                              }}
+                              loading="lazy"
+                            />
+                          </div>
                         )}
                         
                         {/* Reactions */}

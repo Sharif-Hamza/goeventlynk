@@ -17,8 +17,9 @@ export default function EventHistory() {
       return tickets.filter(ticket => ticket.event); // Only show tickets with valid event data
     },
     enabled: !!user,
-    staleTime: 1000 * 60, // Consider data stale after 1 minute
+    staleTime: 0, // Remove stale time to always fetch fresh data
     refetchOnWindowFocus: true,
+    refetchInterval: 1000, // Refetch every second while component is mounted
   });
 
   // Handle error state

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Upload } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadImage, getStorageUrl } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
@@ -23,22 +23,10 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
   const handleImageUpload = async (file: File) => {
     try {
       const fileExt = file.name.split('.').pop();
-      const fileName = `${uuidv4()}.${fileExt}`;
-      const filePath = `${fileName}`;
+      const fileName = `${clubId}-${uuidv4()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('club-posts')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('club-posts')
-        .getPublicUrl(filePath);
-
+      // Upload image using the utility function
+      const publicUrl = await uploadImage(file, 'club-posts', fileName);
       return publicUrl;
     } catch (error) {
       console.error('Error uploading image:', error);
@@ -57,8 +45,13 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
       if (image) {
         try {
           image_url = await handleImageUpload(image);
+          if (!image_url) {
+            throw new Error('Failed to get image URL');
+          }
         } catch (error) {
+          console.error('Image upload error:', error);
           toast.error('Failed to upload image');
+          setLoading(false);
           return;
         }
       }
@@ -70,13 +63,15 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
           admin_id: user.id,
           title: formData.title,
           description: formData.description,
-          image_url
+          image_url,
+          created_at: new Date().toISOString()
         }]);
 
       if (error) throw error;
 
       toast.success('Post created successfully!');
       onSuccess();
+      onClose();
     } catch (error) {
       console.error('Error creating post:', error);
       toast.error('Failed to create post');

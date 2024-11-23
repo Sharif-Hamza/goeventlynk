@@ -25,7 +25,11 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
     const initializeScanner = async () => {
       try {
         readerRef.current = new BrowserMultiFormatReader();
-        readerRef.current.formats = [BarcodeFormat.CODE_128];
+        readerRef.current.formats = [
+          BarcodeFormat.QR_CODE,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.DATA_MATRIX
+        ];
         
         setScanning(true);
         setDebugInfo('Starting scanner...');
@@ -38,15 +42,19 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
             video: {
               facingMode: 'environment',
               width: { ideal: 1280 },
-              height: { ideal: 720 },
-              aspectRatio: { ideal: 1.7777777778 }
+              height: { ideal: 720 }
             }
           },
           videoRef.current,
-          (result, err) => {
+          async (result, err) => {
             if (result) {
-              setDebugInfo('Barcode found: ' + result.getText());
-              handleTicketValidation(result.getText());
+              setDebugInfo('Code found: ' + result.getText());
+              try {
+                await handleTicketValidation(result.getText());
+              } catch (error) {
+                setDebugInfo('Validation error: ' + error.message);
+                toast.error(error.message);
+              }
             }
             if (err && scanning) {
               if (Math.random() < 0.1) {
@@ -77,33 +85,52 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
 
     try {
       setDebugInfo(`Validating ticket data: ${ticketData}`);
-      const decryptedData = decryptTicketData(ticketData);
+      
+      // First try to validate as encrypted data
+      let decryptedData = decryptTicketData(ticketData);
       
       if (!decryptedData) {
-        throw new Error('Invalid ticket data');
-      }
+        // If decryption fails, try validating as a ticket number
+        setDebugInfo(prev => `${prev}\nTrying as ticket number...`);
+        const { data: ticket, error: fetchError } = await supabase
+          .from('event_tickets')
+          .select('*')
+          .eq('ticket_number', ticketData)
+          .single();
 
-      const { ticketId, eventId, userId, ticketNumber, timestamp } = decryptedData;
+        if (fetchError || !ticket) {
+          throw new Error('Invalid ticket data or number');
+        }
 
-      // Verify ticket exists and matches decrypted data
-      const { data: ticketRecord, error: ticketError } = await supabase
-        .from('event_tickets')
-        .select('*')
-        .eq('id', ticketId)
-        .eq('event_id', eventId)
-        .eq('user_id', userId)
-        .eq('ticket_number', ticketNumber)
-        .single();
+        // Validate ticket using the common validation function
+        const result = await validateTicket(ticket.id, user.id);
+        if (!result.success) {
+          throw new Error(result.message);
+        }
+      } else {
+        // Validate decrypted QR code data
+        const { ticketId, eventId, userId, ticketNumber, timestamp } = decryptedData;
+        setDebugInfo(prev => `${prev}\nDecrypted ticket ID: ${ticketId}`);
 
-      if (ticketError || !ticketRecord) {
-        throw new Error('Ticket not found or invalid');
-      }
+        // Verify ticket exists and matches decrypted data
+        const { data: ticketRecord, error: ticketError } = await supabase
+          .from('event_tickets')
+          .select('*')
+          .eq('id', ticketId)
+          .eq('event_id', eventId)
+          .eq('user_id', userId)
+          .eq('ticket_number', ticketNumber)
+          .single();
 
-      // Validate ticket using the common validation function
-      const result = await validateTicket(ticketId, user.id);
-      
-      if (!result.success) {
-        throw new Error(result.message);
+        if (ticketError || !ticketRecord) {
+          throw new Error('Ticket not found or invalid');
+        }
+
+        // Validate ticket using the common validation function
+        const result = await validateTicket(ticketId, user.id);
+        if (!result.success) {
+          throw new Error(result.message);
+        }
       }
 
       setSuccess('Ticket validated successfully!');
@@ -116,6 +143,7 @@ export default function QRCodeScanner({ onClose }: QRCodeScannerProps) {
       setError(message);
       setSuccess(null);
       toast.error(message);
+      setDebugInfo(prev => `${prev}\nError: ${message}`);
     }
   };
 

@@ -16,12 +16,6 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     flowType: 'implicit'
-  },
-  global: {
-    headers: {
-      'Cache-Control': 'no-store',
-      'Cross-Origin-Resource-Policy': 'cross-origin'
-    }
   }
 });
 
@@ -44,7 +38,9 @@ export async function getStorageUrl(bucket: string, path: string | null): Promis
       throw new Error('Failed to get public URL');
     }
 
-    return data.publicUrl;
+    // Transform the URL to use direct storage access
+    const url = new URL(data.publicUrl);
+    return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
   } catch (error) {
     console.error('Error getting storage URL:', error);
     return '';

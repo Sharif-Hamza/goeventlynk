@@ -21,12 +21,10 @@ export function StorageImage({ bucket, path, fallbackSrc, alt, className, ...pro
       }
 
       try {
-        const blob = await downloadImage(bucket, path);
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          setImageSrc(url);
+        const base64 = await downloadImage(bucket, path);
+        if (base64) {
+          setImageSrc(base64);
           setError(false);
-          return () => URL.revokeObjectURL(url);
         } else {
           throw new Error('Failed to load image');
         }

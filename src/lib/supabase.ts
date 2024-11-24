@@ -31,23 +31,33 @@ export const STORAGE_BUCKETS = {
   CLUB_POSTS: 'club-posts'
 } as const;
 
+// Helper function to convert Blob to base64
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 // Helper function to get a storage URL for an image
 export async function getStorageUrl(bucket: string, path: string | null): Promise<string> {
   if (!path) return '';
   
   try {
-    // Create a signed URL with longer expiry
     const { data, error } = await supabase.storage
       .from(bucket)
-      .createSignedUrl(path, 60 * 60 * 24); // 24 hour expiry
+      .download(path);
 
-    if (error || !data?.signedUrl) {
-      console.error('Error getting signed URL:', error);
+    if (error || !data) {
+      console.error('Error downloading image:', error);
       return '';
     }
 
-    // Return the signed URL
-    return data.signedUrl;
+    // Convert blob to base64 data URL
+    const base64 = await blobToBase64(data);
+    return base64;
   } catch (error) {
     console.error('Error getting storage URL:', error);
     return '';
@@ -55,7 +65,7 @@ export async function getStorageUrl(bucket: string, path: string | null): Promis
 }
 
 // Helper function to directly download an image
-export async function downloadImage(bucket: string, path: string): Promise<Blob | null> {
+export async function downloadImage(bucket: string, path: string): Promise<string | null> {
   try {
     const { data, error } = await supabase.storage
       .from(bucket)
@@ -66,7 +76,9 @@ export async function downloadImage(bucket: string, path: string): Promise<Blob 
       return null;
     }
 
-    return data;
+    // Convert blob to base64 data URL
+    const base64 = await blobToBase64(data);
+    return base64;
   } catch (error) {
     console.error('Error downloading image:', error);
     return null;
@@ -95,7 +107,7 @@ export async function uploadImage(file: File, bucket: string): Promise<string | 
 }
 
 // Helper function to handle image URLs with fallback
-export function getImageUrlWithFallback(bucket: string, path: string | null, defaultImage: string): string {
-  if (!path) return defaultImage;
+export function getImageUrlWithFallback(bucket: string, path: string | null, defaultImage: string): Promise<string> {
+  if (!path) return Promise.resolve(defaultImage);
   return getStorageUrl(bucket, path).then(url => url || defaultImage);
 }

@@ -48,7 +48,12 @@ export default defineConfig({
   server: {
     https: true,
     port: 5173,
-    host: true
+    host: true,
+    headers: {
+      'Cross-Origin-Embedder-Policy': 'unsafe-none',
+      'Cross-Origin-Opener-Policy': 'unsafe-none',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    }
   },
   build: {
     rollupOptions: {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Upload } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadImage, getStorageUrl, STORAGE_BUCKETS } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
@@ -15,6 +15,8 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [image, setImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imagePath, setImagePath] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -22,27 +24,21 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
 
   const handleImageUpload = async (file: File) => {
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${uuidv4()}.${fileExt}`;
-      const filePath = `${fileName}`;
+      const filePath = await uploadImage(file, STORAGE_BUCKETS.CLUB_POSTS);
+      if (!filePath) {
+        throw new Error('Failed to upload image');
+      }
 
-      const { error: uploadError } = await supabase.storage
-        .from('club-posts')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('club-posts')
-        .getPublicUrl(filePath);
-
-      return publicUrl;
+      // Get signed URL for preview
+      const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_POSTS, filePath);
+      if (url) {
+        setImagePreview(url);
+      }
+      
+      setImagePath(filePath);
     } catch (error) {
       console.error('Error uploading image:', error);
-      throw new Error('Failed to upload image');
+      toast.error('Failed to upload image');
     }
   };
 
@@ -56,27 +52,31 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
 
       if (image) {
         try {
-          image_url = await handleImageUpload(image);
+          await handleImageUpload(image);
+          image_url = imagePath;
         } catch (error) {
           toast.error('Failed to upload image');
           return;
         }
       }
 
-      const { error } = await supabase
+      const { error: postError } = await supabase
         .from('club_posts')
-        .insert([{
-          club_id: clubId,
-          admin_id: user.id,
-          title: formData.title,
-          description: formData.description,
-          image_url
-        }]);
+        .insert([
+          {
+            club_id: clubId,
+            user_id: user.id,
+            title: formData.title,
+            description: formData.description,
+            image_url,
+          },
+        ]);
 
-      if (error) throw error;
+      if (postError) throw postError;
 
-      toast.success('Post created successfully!');
-      onSuccess();
+      toast.success('Post created successfully');
+      onSuccess?.();
+      onClose();
     } catch (error) {
       console.error('Error creating post:', error);
       toast.error('Failed to create post');
@@ -159,6 +159,31 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
               </div>
             </div>
           </div>
+
+          {imagePreview && (
+            <div className="relative mt-4">
+              <img
+                src={imagePreview}
+                alt="Post preview"
+                className="max-w-full h-auto rounded-lg"
+                loading="lazy"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = '/default-post.svg';
+                }}
+              />
+              <button
+                onClick={() => {
+                  setImagePreview(null);
+                  setImage(null);
+                  setImagePath(null);
+                }}
+                className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           <div className="flex justify-end">
             <button

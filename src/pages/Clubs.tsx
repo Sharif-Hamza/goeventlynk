@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadImage, getStorageUrl, STORAGE_BUCKETS } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Building, Users, Bell, Calendar, Image, Trash2, Camera, Heart, ThumbsUp, Star } from 'lucide-react';
 import ClubPostModal from '../components/ClubPostModal';
@@ -72,6 +72,7 @@ export default function Clubs() {
   const [selectedClub, setSelectedClub] = useState<string | null>(null);
   const [showPostModal, setShowPostModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   // Fetch clubs
   const { data: clubs, isLoading } = useQuery({
@@ -147,6 +148,41 @@ export default function Clubs() {
     },
   });
 
+  // Load images for clubs and posts
+  useEffect(() => {
+    const loadImages = async () => {
+      if (!clubs) return;
+
+      const newUrls: Record<string, string> = {};
+
+      // Load banner images
+      for (const club of clubs) {
+        if (club.banner_url) {
+          const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_BANNERS, club.banner_url);
+          if (url) {
+            newUrls[`banner-${club.id}`] = url;
+          }
+        }
+
+        // Load post images
+        if (clubPosts) {
+          for (const post of clubPosts) {
+            if (post.image_url) {
+              const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_POSTS, post.image_url);
+              if (url) {
+                newUrls[`post-${post.id}`] = url;
+              }
+            }
+          }
+        }
+      }
+
+      setImageUrls(newUrls);
+    };
+
+    loadImages();
+  }, [clubs, clubPosts]);
+
   // Follow/unfollow mutation
   const followMutation = useMutation({
     mutationFn: async ({ clubId, action }: { clubId: string; action: 'follow' | 'unfollow' }) => {
@@ -193,32 +229,31 @@ export default function Clubs() {
   // Update banner mutation
   const updateBannerMutation = useMutation({
     mutationFn: async ({ clubId, file }: { clubId: string; file: File }) => {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${clubId}-${uuidv4()}.${fileExt}`;
+      try {
+        const filePath = await uploadImage(file, STORAGE_BUCKETS.CLUB_BANNERS);
+        if (!filePath) {
+          throw new Error('Failed to upload banner');
+        }
 
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('club-banners')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: true
-        });
+        // Update club record with the file path
+        const { error: updateError } = await supabase
+          .from('clubs')
+          .update({ banner_url: filePath })
+          .eq('id', clubId);
 
-      if (uploadError) throw uploadError;
+        if (updateError) throw updateError;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('club-banners')
-        .getPublicUrl(fileName);
+        // Get the signed URL for immediate display
+        const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_BANNERS, filePath);
+        if (url) {
+          setImageUrls(prev => ({ ...prev, [`banner-${clubId}`]: url }));
+        }
 
-      // Update club record
-      const { error: updateError } = await supabase
-        .from('clubs')
-        .update({ banner_url: publicUrl })
-        .eq('id', clubId);
-
-      if (updateError) throw updateError;
-      return publicUrl;
+        return filePath;
+      } catch (error) {
+        console.error('Error updating banner:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clubs'] });
@@ -397,18 +432,17 @@ export default function Clubs() {
       <div className="grid gap-6">
         {clubs?.map(club => (
           <div key={club.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="relative h-48 bg-gray-200">
-              {club.banner_url ? (
-                <img
-                  src={club.banner_url}
-                  alt={`${club.name} banner`}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-purple-100">
-                  <Building className="w-16 h-16 text-purple-300" />
-                </div>
-              )}
+            <div className="relative w-full h-48 bg-gray-100 rounded-t-lg overflow-hidden">
+              <img
+                src={imageUrls[`banner-${club.id}`] || '/default-banner.svg'}
+                alt={`${club.name} banner`}
+                className="w-full h-full object-cover"
+                loading="lazy"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = '/default-banner.svg';
+                }}
+              />
               {isClubAdmin(club) && (
                 <>
                   <button
@@ -523,9 +557,14 @@ export default function Clubs() {
                         <p className="text-gray-600 mb-2">{post.description}</p>
                         {post.image_url && (
                           <img
-                            src={post.image_url}
+                            src={imageUrls[`post-${post.id}`] || '/default-post.svg'}
                             alt={post.title}
                             className="max-w-full h-auto rounded-lg mb-2"
+                            loading="lazy"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = '/default-post.svg';
+                            }}
                           />
                         )}
                         

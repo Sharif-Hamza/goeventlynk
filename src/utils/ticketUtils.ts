@@ -129,15 +129,14 @@ export const generateTicketNumber = () => {
 
 export const encryptTicketData = (data: any): string => {
   const jsonString = JSON.stringify(data);
-  // Use base64 encoding directly, which is safe for QR codes
-  return btoa(jsonString);
+  return CryptoJS.AES.encrypt(jsonString, ENCRYPTION_KEY).toString();
 };
 
 export const decryptTicketData = (encryptedData: string): any => {
   try {
-    // Decode base64 string
-    const jsonString = atob(encryptedData);
-    return JSON.parse(jsonString);
+    const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
+    const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
+    return JSON.parse(decryptedString);
   } catch (error) {
     console.error('Error decrypting ticket data:', error);
     return null;

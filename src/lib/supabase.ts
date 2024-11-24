@@ -36,23 +36,40 @@ export async function getStorageUrl(bucket: string, path: string | null): Promis
   if (!path) return '';
   
   try {
-    const { data } = supabase.storage
+    // Create a signed URL with longer expiry
+    const { data, error } = await supabase.storage
       .from(bucket)
-      .getPublicUrl(path, {
-        download: false,
-        transform: {
-          quality: 75
-        }
-      });
+      .createSignedUrl(path, 60 * 60 * 24); // 24 hour expiry
 
-    if (!data?.publicUrl) {
-      throw new Error('Failed to get public URL');
+    if (error || !data?.signedUrl) {
+      console.error('Error getting signed URL:', error);
+      return '';
     }
 
-    return data.publicUrl;
+    // Return the signed URL
+    return data.signedUrl;
   } catch (error) {
     console.error('Error getting storage URL:', error);
     return '';
+  }
+}
+
+// Helper function to directly download an image
+export async function downloadImage(bucket: string, path: string): Promise<Blob | null> {
+  try {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .download(path);
+    
+    if (error || !data) {
+      console.error('Error downloading image:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error downloading image:', error);
+    return null;
   }
 }
 

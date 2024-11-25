@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { X, Upload } from 'lucide-react';
-import { supabase, uploadImage, getStorageUrl, STORAGE_BUCKETS } from '../lib/supabase';
+import { supabase, uploadImage, STORAGE_BUCKETS } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
+import { useImageLoader } from '../hooks/useImageLoader';
 
 interface ClubPostModalProps {
   clubId: string;
@@ -13,33 +14,22 @@ interface ClubPostModalProps {
 
 export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostModalProps) {
   const { user } = useAuth();
+  const { handleImageUpload, previewUrl, imageUrl, loading: imageLoading } = useImageLoader({
+    bucket: STORAGE_BUCKETS.CLUB_POSTS,
+    fallbackImageUrl: '/default-post.svg'
+  });
   const [loading, setLoading] = useState(false);
-  const [image, setImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imagePath, setImagePath] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
   });
 
-  const handleImageUpload = async (file: File) => {
-    try {
-      const filePath = await uploadImage(file, STORAGE_BUCKETS.CLUB_POSTS);
-      if (!filePath) {
-        throw new Error('Failed to upload image');
-      }
-
-      // Get signed URL for preview
-      const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_POSTS, filePath);
-      if (url) {
-        setImagePreview(url);
-      }
-      
-      setImagePath(filePath);
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      toast.error('Failed to upload image');
-    }
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    console.log('File selected:', file);
+    setSelectedFile(file);
+    await handleImageUpload(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,34 +38,43 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
 
     setLoading(true);
     try {
-      let image_url = null;
+      if (!formData.title.trim() || !formData.description.trim()) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
 
-      if (image) {
-        try {
-          await handleImageUpload(image);
-          image_url = imagePath;
-        } catch (error) {
-          toast.error('Failed to upload image');
-          return;
+      // First, ensure the image is uploaded if one was selected
+      let finalImageUrl = imageUrl;
+      if (selectedFile && !imageUrl) {
+        console.log('Uploading image before creating post...');
+        finalImageUrl = await handleImageUpload(selectedFile);
+        if (!finalImageUrl) {
+          throw new Error('Failed to upload image');
         }
       }
 
-      const { error: postError } = await supabase
+      console.log('Creating post with:', { ...formData, imageUrl: finalImageUrl });
+      const { error: insertError } = await supabase
         .from('club_posts')
         .insert([
           {
-            club_id: clubId,
-            user_id: user.id,
+            id: uuidv4(),
             title: formData.title,
             description: formData.description,
-            image_url,
+            image_url: finalImageUrl,
+            club_id: clubId,
+            admin_id: user.id,
+            user_id: user.id
           },
         ]);
 
-      if (postError) throw postError;
+      if (insertError) {
+        console.error('Insert error:', insertError);
+        throw insertError;
+      }
 
-      toast.success('Post created successfully');
-      onSuccess?.();
+      toast.success('Post created successfully!');
+      onSuccess();
       onClose();
     } catch (error) {
       console.error('Error creating post:', error);
@@ -124,26 +123,26 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Post Image (Optional)
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Post Image
             </label>
-            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-gray-400 transition-colors duration-200">
               <div className="space-y-1 text-center">
                 <Upload className="mx-auto h-12 w-12 text-gray-400" />
                 <div className="flex text-sm text-gray-600">
                   <label
-                    htmlFor="image"
+                    htmlFor="file-upload"
                     className="relative cursor-pointer bg-white rounded-md font-medium text-purple-600 hover:text-purple-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-purple-500"
                   >
                     <span>Upload a file</span>
                     <input
-                      id="image"
-                      name="image"
+                      id="file-upload"
+                      name="file-upload"
                       type="file"
-                      accept="image/*"
                       className="sr-only"
-                      onChange={(e) => setImage(e.target.files?.[0] || null)}
+                      accept="image/*"
+                      onChange={handleImageChange}
                     />
                   </label>
                   <p className="pl-1">or drag and drop</p>
@@ -151,33 +150,21 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
                 <p className="text-xs text-gray-500">
                   PNG, JPG, GIF up to 10MB
                 </p>
-                {image && (
-                  <p className="text-sm text-purple-600">
-                    Selected file: {image.name}
-                  </p>
-                )}
               </div>
             </div>
           </div>
 
-          {imagePreview && (
+          {previewUrl && (
             <div className="relative mt-4">
               <img
-                src={imagePreview}
+                src={previewUrl}
                 alt="Post preview"
-                className="max-w-full h-auto rounded-lg"
+                className="max-w-full h-auto rounded-lg shadow-md"
                 loading="lazy"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.src = '/default-post.svg';
-                }}
               />
               <button
-                onClick={() => {
-                  setImagePreview(null);
-                  setImage(null);
-                  setImagePath(null);
-                }}
+                type="button"
+                onClick={() => handleImageChange(null)}
                 className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
               >
                 <X className="w-4 h-4" />
@@ -188,10 +175,12 @@ export default function ClubPostModal({ clubId, onClose, onSuccess }: ClubPostMo
           <div className="flex justify-end">
             <button
               type="submit"
-              className="btn btn-primary"
-              disabled={loading}
+              disabled={loading || imageLoading}
+              className={`w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 ${
+                (loading || imageLoading) ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              {loading ? 'Creating...' : 'Create Post'}
+              {loading || imageLoading ? 'Creating...' : 'Create Post'}
             </button>
           </div>
         </form>

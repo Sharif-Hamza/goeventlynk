@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { supabase, uploadImage, getStorageUrl, STORAGE_BUCKETS } from '../lib/supabase';
+import { supabase, uploadImage, STORAGE_BUCKETS, useImageLoader } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Building, Users, Bell, Calendar, Image, Trash2, Camera, Heart, ThumbsUp, Star } from 'lucide-react';
 import ClubPostModal from '../components/ClubPostModal';
@@ -72,7 +72,6 @@ export default function Clubs() {
   const [selectedClub, setSelectedClub] = useState<string | null>(null);
   const [showPostModal, setShowPostModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   // Fetch clubs
   const { data: clubs, isLoading } = useQuery({
@@ -148,41 +147,6 @@ export default function Clubs() {
     },
   });
 
-  // Load images for clubs and posts
-  useEffect(() => {
-    const loadImages = async () => {
-      if (!clubs) return;
-
-      const newUrls: Record<string, string> = {};
-
-      // Load banner images
-      for (const club of clubs) {
-        if (club.banner_url) {
-          const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_BANNERS, club.banner_url);
-          if (url) {
-            newUrls[`banner-${club.id}`] = url;
-          }
-        }
-
-        // Load post images
-        if (clubPosts) {
-          for (const post of clubPosts) {
-            if (post.image_url) {
-              const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_POSTS, post.image_url);
-              if (url) {
-                newUrls[`post-${post.id}`] = url;
-              }
-            }
-          }
-        }
-      }
-
-      setImageUrls(newUrls);
-    };
-
-    loadImages();
-  }, [clubs, clubPosts]);
-
   // Follow/unfollow mutation
   const followMutation = useMutation({
     mutationFn: async ({ clubId, action }: { clubId: string; action: 'follow' | 'unfollow' }) => {
@@ -244,9 +208,9 @@ export default function Clubs() {
         if (updateError) throw updateError;
 
         // Get the signed URL for immediate display
-        const url = await getStorageUrl(STORAGE_BUCKETS.CLUB_BANNERS, filePath);
+        const url = filePath;
         if (url) {
-          setImageUrls(prev => ({ ...prev, [`banner-${clubId}`]: url }));
+          return url;
         }
 
         return filePath;
@@ -430,191 +394,202 @@ export default function Clubs() {
       </div>
 
       <div className="grid gap-6">
-        {clubs?.map(club => (
-          <div key={club.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="relative w-full h-48 bg-gray-100 rounded-t-lg overflow-hidden">
-              <img
-                src={imageUrls[`banner-${club.id}`] || '/default-banner.svg'}
-                alt={`${club.name} banner`}
-                className="w-full h-full object-cover"
-                loading="lazy"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.src = '/default-banner.svg';
-                }}
-              />
-              {isClubAdmin(club) && (
-                <>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
-                    title="Update banner"
-                  >
-                    <Camera className="w-5 h-5 text-gray-600" />
-                  </button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    className="hidden"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        handleBannerUpload(club.id, file);
-                      }
-                    }}
-                  />
-                </>
-              )}
-            </div>
+        {clubs?.map(club => {
+          const { imageUrl: bannerUrl } = useImageLoader({ 
+            originalUrl: club.banner_url,
+            bucket: STORAGE_BUCKETS.CLUB_BANNERS,
+            fallbackImageUrl: '/default-banner.svg'
+          });
 
-            <div className="p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h2 className="text-2xl font-bold mb-2">{club.name}</h2>
-                  <p className="text-gray-600 mb-4">{club.description}</p>
-                  
-                  {/* Club Statistics */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                    <div className="flex items-center text-gray-600">
-                      <Users className="w-5 h-5 mr-2 text-purple-600" />
-                      <span>{getClubStats(club.id).follower_count} followers</span>
-                    </div>
-                    <div className="flex items-center text-gray-600">
-                      <Bell className="w-5 h-5 mr-2 text-purple-600" />
-                      <span>{getClubStats(club.id).announcement_count} announcements</span>
-                    </div>
-                    <div className="flex items-center text-gray-600">
-                      <Calendar className="w-5 h-5 mr-2 text-purple-600" />
-                      <span>{getClubStats(club.id).event_count} events</span>
-                    </div>
-                    <div className="flex items-center text-gray-600">
-                      <Image className="w-5 h-5 mr-2 text-purple-600" />
-                      <span>{getClubStats(club.id).post_count} posts</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Club Actions */}
-                <div className="flex gap-2">
-                  {user?.is_admin && (
+          return (
+            <div key={club.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+              <div className="relative w-full h-48 bg-gray-100 rounded-t-lg overflow-hidden">
+                <img
+                  src={bannerUrl || '/default-banner.svg'}
+                  alt={`${club.name} banner`}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+                {isClubAdmin(club) && (
+                  <>
                     <button
-                      onClick={() => handleDeleteClub(club.id)}
-                      className="text-red-500 hover:text-red-700"
-                      title="Delete Club"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
+                      title="Update banner"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Camera className="w-5 h-5 text-gray-600" />
                     </button>
-                  )}
-                  {user && !isClubAdmin(club) && (
-                    <button
-                      onClick={() => handleFollowToggle(club.id)}
-                      className="btn btn-primary btn-sm"
-                      disabled={followMutation.isPending}
-                    >
-                      {followedClubs?.includes(club.id) ? 'Unfollow' : 'Follow'}
-                    </button>
-                  )}
-                  {isClubAdmin(club) && (
-                    <button
-                      onClick={() => {
-                        setSelectedClub(club.id);
-                        setShowPostModal(true);
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          handleBannerUpload(club.id, file);
+                        }
                       }}
-                      className="btn btn-secondary btn-sm"
-                    >
-                      Create Post
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Club Posts */}
-              <div className="mt-4">
-                <button
-                  onClick={() => setSelectedClub(selectedClub === club.id ? null : club.id)}
-                  className="btn btn-secondary btn-sm mb-4"
-                >
-                  {selectedClub === club.id ? 'Hide Posts' : 'Show Posts'}
-                </button>
-
-                {selectedClub === club.id && (
-                  <div className="space-y-4">
-                    {clubPosts?.map(post => (
-                      <div key={post.id} className="bg-gray-50 p-4 rounded-lg">
-                        <div className="flex justify-between items-start mb-2">
-                          <h3 className="text-xl font-semibold">{post.title}</h3>
-                          {isPostAdmin(post) && (
-                            <button
-                              onClick={() => handleDeletePost(post.id)}
-                              className="text-red-500 hover:text-red-700"
-                              title="Delete Post"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-gray-600 mb-2">{post.description}</p>
-                        {post.image_url && (
-                          <img
-                            src={imageUrls[`post-${post.id}`] || '/default-post.svg'}
-                            alt={post.title}
-                            className="max-w-full h-auto rounded-lg mb-2"
-                            loading="lazy"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = '/default-post.svg';
-                            }}
-                          />
-                        )}
-                        
-                        {/* Reactions */}
-                        <div className="flex items-center gap-4 mt-4 mb-2">
-                          {REACTION_TYPES.map((reaction) => {
-                            const Icon = reaction.icon;
-                            const postReactions = getPostReactions(post.id);
-                            const reactionData = postReactions[reaction.type] || { count: 0, userReacted: false };
-                            
-                            return (
-                              <button
-                                key={reaction.type}
-                                onClick={() => handleReaction(post.id, reaction.type)}
-                                className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all duration-200 ${
-                                  reactionData.userReacted
-                                    ? `${reaction.bgColor} ${reaction.activeColor}`
-                                    : `hover:bg-gray-100 ${reaction.hoverColor} text-gray-500`
-                                }`}
-                                disabled={!user}
-                                title={user ? `${reaction.type.toLowerCase()} this post` : 'Login to react'}
-                              >
-                                <Icon
-                                  className={`w-5 h-5 ${reactionData.userReacted ? 'fill-current' : ''}`}
-                                  strokeWidth={reactionData.userReacted ? 2.5 : 2}
-                                />
-                                <span className={`text-sm font-medium ${
-                                  reactionData.userReacted ? reaction.activeColor : 'text-gray-600'
-                                }`}>
-                                  {reactionData.count > 0 ? reactionData.count : ''}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        <div className="text-sm text-gray-500">
-                          Posted on {new Date(post.created_at).toLocaleDateString()}
-                        </div>
-                      </div>
-                    ))}
-                    {(!clubPosts || clubPosts.length === 0) && (
-                      <p className="text-gray-500">No posts yet.</p>
-                    )}
-                  </div>
+                    />
+                  </>
                 )}
               </div>
+
+              <div className="p-6">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-2">{club.name}</h2>
+                    <p className="text-gray-600 mb-4">{club.description}</p>
+                    
+                    {/* Club Statistics */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                      <div className="flex items-center text-gray-600">
+                        <Users className="w-5 h-5 mr-2 text-purple-600" />
+                        <span>{getClubStats(club.id).follower_count} followers</span>
+                      </div>
+                      <div className="flex items-center text-gray-600">
+                        <Bell className="w-5 h-5 mr-2 text-purple-600" />
+                        <span>{getClubStats(club.id).announcement_count} announcements</span>
+                      </div>
+                      <div className="flex items-center text-gray-600">
+                        <Calendar className="w-5 h-5 mr-2 text-purple-600" />
+                        <span>{getClubStats(club.id).event_count} events</span>
+                      </div>
+                      <div className="flex items-center text-gray-600">
+                        <Image className="w-5 h-5 mr-2 text-purple-600" />
+                        <span>{getClubStats(club.id).post_count} posts</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Club Actions */}
+                  <div className="flex gap-2">
+                    {user?.is_admin && (
+                      <button
+                        onClick={() => handleDeleteClub(club.id)}
+                        className="text-red-500 hover:text-red-700"
+                        title="Delete Club"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
+                    {user && !isClubAdmin(club) && (
+                      <button
+                        onClick={() => handleFollowToggle(club.id)}
+                        className="btn btn-primary btn-sm"
+                        disabled={followMutation.isPending}
+                      >
+                        {followedClubs?.includes(club.id) ? 'Unfollow' : 'Follow'}
+                      </button>
+                    )}
+                    {isClubAdmin(club) && (
+                      <button
+                        onClick={() => {
+                          setSelectedClub(club.id);
+                          setShowPostModal(true);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Create Post
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Club Posts */}
+                <div className="mt-4">
+                  <button
+                    onClick={() => setSelectedClub(selectedClub === club.id ? null : club.id)}
+                    className="btn btn-secondary btn-sm mb-4"
+                  >
+                    {selectedClub === club.id ? 'Hide Posts' : 'Show Posts'}
+                  </button>
+
+                  {selectedClub === club.id && (
+                    <div className="space-y-4">
+                      {clubPosts?.map(post => {
+                        return (
+                          <div key={post.id} className="bg-gray-50 p-4 rounded-lg">
+                            <div className="flex justify-between items-start mb-2">
+                              <h3 className="text-xl font-semibold">{post.title}</h3>
+                              {isPostAdmin(post) && (
+                                <button
+                                  onClick={() => handleDeletePost(post.id)}
+                                  className="text-red-500 hover:text-red-700"
+                                  title="Delete Post"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-gray-600 mb-2">{post.description}</p>
+                            {post.image_url && (
+                              <div className="mt-4 mb-4">
+                                <img
+                                  src={useImageLoader({ 
+                                    originalUrl: post.image_url,
+                                    bucket: STORAGE_BUCKETS.CLUB_POSTS,
+                                    fallbackImageUrl: '/default-post.svg'
+                                  }).imageUrl || '/default-post.svg'}
+                                  alt={post.title}
+                                  className="w-full h-auto rounded-lg shadow-md"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.src = '/default-post.svg';
+                                  }}
+                                />
+                              </div>
+                            )}
+                            
+                            {/* Reactions */}
+                            <div className="flex items-center gap-4 mt-4 mb-2">
+                              {REACTION_TYPES.map((reaction) => {
+                                const Icon = reaction.icon;
+                                const postReactions = getPostReactions(post.id);
+                                const reactionData = postReactions[reaction.type] || { count: 0, userReacted: false };
+                                
+                                return (
+                                  <button
+                                    key={reaction.type}
+                                    onClick={() => handleReaction(post.id, reaction.type)}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all duration-200 ${
+                                      reactionData.userReacted
+                                        ? `${reaction.bgColor} ${reaction.activeColor}`
+                                        : `hover:bg-gray-100 ${reaction.hoverColor} text-gray-500`
+                                    }`}
+                                    disabled={!user}
+                                    title={user ? `${reaction.type.toLowerCase()} this post` : 'Login to react'}
+                                  >
+                                    <Icon
+                                      className={`w-5 h-5 ${reactionData.userReacted ? 'fill-current' : ''}`}
+                                      strokeWidth={reactionData.userReacted ? 2.5 : 2}
+                                    />
+                                    <span className={`text-sm font-medium ${
+                                      reactionData.userReacted ? reaction.activeColor : 'text-gray-600'
+                                    }`}>
+                                      {reactionData.count > 0 ? reactionData.count : ''}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <div className="text-sm text-gray-500">
+                              Posted on {new Date(post.created_at).toLocaleDateString()}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(!clubPosts || clubPosts.length === 0) && (
+                        <p className="text-gray-500">No posts yet.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {showPostModal && selectedClub && (

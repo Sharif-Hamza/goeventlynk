@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { supabase, uploadImage, STORAGE_BUCKETS, useImageLoader } from '../lib/supabase';
+import { supabase, uploadImage, STORAGE_BUCKETS } from '../lib/supabase';
+import { useImageLoader } from '../hooks/useImageLoader';
 import { useAuth } from '../context/AuthContext';
 import { Building, Users, Bell, Calendar, Image, Trash2, Camera, Heart, ThumbsUp, Star } from 'lucide-react';
 import ClubPostModal from '../components/ClubPostModal';
